@@ -1,0 +1,4 @@
+__pycache__
+*.pyc
+*.core
+parquet-to-arrow
