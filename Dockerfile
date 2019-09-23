@@ -35,6 +35,7 @@ ENV PKG_CONFIG_PATH "/src/apache-arrow-0.14.1/cpp/gflags_ep-prefix/src/gflags_ep
 ENV CMAKE_PREFIX_PATH "/src/apache-arrow-0.14.1/cpp/thrift_ep/src/thrift_ep-install:/src/apache-arrow-0.14.1/cpp/lz4_ep-prefix/src/lz4_ep:/src/apache-arrow-0.14.1/cpp/brotli_ep/src/brotli_ep-install:/src/apache-arrow-0.14.1/cpp/double-conversion_ep/src/double-conversion_ep"
 ENV Snappy_DIR "/src/apache-arrow-0.14.1/cpp/snappy_ep/src/snappy_ep-install/lib/cmake/Snappy"
 
+
 FROM python:3.7.4-buster AS python-dev
 
 RUN pip install pyarrow==0.14.1 pytest pandas==0.25.1
@@ -42,27 +43,27 @@ RUN pip install pyarrow==0.14.1 pytest pandas==0.25.1
 RUN mkdir /app
 WORKDIR /app
 
+
 FROM cpp-builddeps AS cpp-build
 
-RUN mkdir /app
+RUN mkdir -p /app/src
+RUN touch /app/src/parquet-to-arrow-slice.cc
 WORKDIR /app
 COPY CMakeLists.txt /app
-RUN touch main.cc
 #RUN cmake -DCMAKE_BUILD_TYPE=Debug .
 RUN cmake .
 
-COPY main.cc /app
+COPY src/ /app/src/
 RUN make
+
 
 FROM python-dev AS test
 
 COPY . /app
-COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
+COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
 WORKDIR /app
-
-RUN pytest --tb=native
+RUN pytest
 
 
 FROM scratch AS dist
-
-COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
+COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice

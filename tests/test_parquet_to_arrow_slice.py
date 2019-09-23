@@ -13,7 +13,7 @@ def do_convert(parquet_path: Path, column_range: str, row_range: str) -> pyarrow
         try:
             subprocess.check_output(
                 [
-                    "/usr/bin/parquet-to-arrow",
+                    "/usr/bin/parquet-to-arrow-slice",
                     str(parquet_path),
                     column_range,
                     row_range,
