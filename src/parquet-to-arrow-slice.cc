@@ -141,15 +141,6 @@ int main(int argc, char** argv) {
   const std::string arrowPath(argv[4]);
 
   std::shared_ptr<arrow::Table> arrowTable(readParquet(parquetPath, columnRange, rowRange));
-
-  std::cout << "Table data: " << std::endl;
-  for (int i = 0; i < arrowTable->num_columns(); i++) {
-    const auto column = arrowTable->column(i);
-    std::cout << "Column '" << column->name() << "' (" << column->data()->num_chunks() << " chunks):" << std::endl;
-    ASSERT_ARROW_OK(arrow::PrettyPrint(*(column->data()), arrow::PrettyPrintOptions(2), &std::cout), "printing column");
-    std::cout << "(did not crash)" << std::endl;
-  }
-
   writeArrow(*arrowTable, arrowPath);
 
   return 0;
