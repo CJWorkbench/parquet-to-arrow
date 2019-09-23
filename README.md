@@ -10,7 +10,7 @@ Use this in your Docker images. For instance:
 
 ```
 # (look to Git tags to find latest VERSION)
-FROM workbenchdata:parquet-to-arrow:VERSION AS parquet-to-arrow
+FROM workbenchdata/parquet-to-arrow:VERSION AS parquet-to-arrow
 
 FROM debian:buster AS my-normal-build
 # ... normal Dockerfile stuff...
