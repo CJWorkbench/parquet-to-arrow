@@ -41,6 +41,12 @@ rows).
 * _Auto-convert UTF-8 dictionaries_: this tool is tuned to small numbers
   of rows; dictionaries are unneeded hassle.
 
+*TODO*:
+
+* When Parquet 0.15 comes out, use its enhanced dictionary support to seek
+  without converting dictionary to string. That should speed slicing a file
+  with an oversized dictionary and hundreds of thousands of rows.
+
 
 Developing
 ==========
