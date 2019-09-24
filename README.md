@@ -47,6 +47,27 @@ rows).
   without converting dictionary to string. That should speed slicing a file
   with an oversized dictionary and hundreds of thousands of rows.
 
+parquet-to-text-stream
+----------------------
+
+*Purpose*: stream a Parquet file for public consumption in common format.
+
+*Usage*: `parquet-to-text-stream input.parquet csv > out.csv`
+(where the format is one of `csv` or ... uh ... that's it for now!)
+
+*Features*:
+
+* _Manageable RAM usage_: in large datasets, hold a small number of rows (and
+  all column dictionaries) in memory.
+* _Quick time to first byte_: streaming clients see results quickly.
+* _CSV Output_ (choose `csv` format): null/inf/-inf/NaN are all output as empty
+  string; all but the most wonky floats are formatted as decimal; timestamps
+  are ISO8601-formatted with the fewest characters possible (e.g., "2019-09-24"
+  instead of "2019-09-24T00:00:00.000000000Z")
+
+*TODO*:
+
+* `json` format
 
 Developing
 ==========

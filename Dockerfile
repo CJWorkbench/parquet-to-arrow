@@ -47,11 +47,11 @@ WORKDIR /app
 FROM cpp-builddeps AS cpp-build
 
 RUN mkdir -p /app/src
-RUN touch /app/src/parquet-to-arrow-slice.cc
+RUN touch /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc
 WORKDIR /app
 COPY CMakeLists.txt /app
-#RUN cmake -DCMAKE_BUILD_TYPE=Debug .
-RUN cmake .
+RUN cmake -DCMAKE_BUILD_TYPE=Debug .
+#RUN cmake .
 
 COPY src/ /app/src/
 RUN make
@@ -61,9 +61,11 @@ FROM python-dev AS test
 
 COPY . /app
 COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
+COPY --from=cpp-build /app/parquet-to-text-stream /usr/bin/parquet-to-text-stream
 WORKDIR /app
-RUN pytest
+RUN pytest -vv
 
 
 FROM scratch AS dist
 COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
+COPY --from=cpp-build /app/parquet-to-text-stream /usr/bin/parquet-to-text-stream

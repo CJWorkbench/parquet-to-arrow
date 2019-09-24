@@ -1,4 +1,4 @@
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 import pathlib
 import os
 import tempfile
@@ -45,8 +45,13 @@ def parquet_file(
     try:
         os.close(fd)
         pyarrow.parquet.write_table(
-            table, filename, compression="SNAPPY", use_dictionary=use_dictionary
+            table,
+            filename,
+            version="2.0",  # allow int64 ns timestamps
+            compression="SNAPPY",
+            use_dictionary=use_dictionary,
         )
         yield pathlib.Path(filename)
     finally:
-        os.unlink(filename)
+        with suppress(FileNotFoundError):
+            os.unlink(filename)

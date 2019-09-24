@@ -11,20 +11,24 @@ from .util import parquet_file, assert_table_equals
 def do_convert(parquet_path: Path, column_range: str, row_range: str) -> pyarrow.Table:
     with tempfile.NamedTemporaryFile() as arrow_file:
         try:
-            subprocess.check_output(
+            subprocess.run(
                 [
                     "/usr/bin/parquet-to-arrow-slice",
                     str(parquet_path),
                     column_range,
                     row_range,
                     arrow_file.name,
-                ]
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=True,
             )
-        except subprocess.SubprocessError as err:
-            sys.stderr.write(
-                "Output: " + err.output.decode("utf-8", errors="replace") + "\n"
-            )
-            raise
+        except subprocess.CalledProcessError as err:
+            # Rewrite error so it's easy to read in test-result stack trace
+            raise RuntimeError(
+                "Process failed with code %d: %s"
+                % (err.returncode, err.output.decode("utf-8", errors="replace"))
+            ) from None
 
         result_reader = pyarrow.ipc.open_file(arrow_file.name)
         return result_reader.read_all()
@@ -32,7 +36,7 @@ def do_convert(parquet_path: Path, column_range: str, row_range: str) -> pyarrow
 
 def _test_read_write_table(
     table: pyarrow.Table, column_range: str = "0-50", row_range: str = "0-200"
-):
+) -> None:
     with parquet_file(table) as parquet_path:
         result = do_convert(parquet_path, column_range, row_range)
         assert_table_equals(result, table)
