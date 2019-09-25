@@ -160,7 +160,7 @@ struct Printer : public arrow::ArrayVisitor {
       if (this->doubleConverter.ToShortestSingle(value, &this->doubleBuilder)) {
         // No need to call this->doubleBuilder.Finalize() because we know
         // where the string ends.
-        fwrite(this->doubleBuffer, 1, this->doubleBuilder.position(), this->fp);
+        fwrite_unlocked(this->doubleBuffer, 1, this->doubleBuilder.position(), this->fp);
       } else {
         std::cerr << "Failed to convert float: " << value << std::endl;
         // I guess we can recover from this. According to the docs, there's no
@@ -180,7 +180,7 @@ struct Printer : public arrow::ArrayVisitor {
       if (this->doubleConverter.ToShortest(value, &this->doubleBuilder)) {
         // No need to call this->doubleBuilder.Finalize() because we know
         // where the string ends.
-        fwrite(this->doubleBuffer, 1, this->doubleBuilder.position(), this->fp);
+        fwrite_unlocked(this->doubleBuffer, 1, this->doubleBuilder.position(), this->fp);
       } else {
         std::cerr << "Failed to convert float: " << value << std::endl;
         // I guess we can recover from this. According to the docs, there's no
@@ -242,12 +242,12 @@ struct CsvPrinter : public Printer {
   void writeRecordStop() override {}
 
   void writeRecordStart(bool isFirst) override {
-    fputc('\n', this->fp); // newline -- start new CSV record
+    fputc_unlocked('\n', this->fp); // newline -- start new CSV record
   }
 
   void writeFieldStart() override {
     if (this->columnIndex > 0) {
-      fputc(',', this->fp);
+      fputc_unlocked(',', this->fp);
     }
   }
 
@@ -271,23 +271,23 @@ struct CsvPrinter : public Printer {
     }
 
     if (!needQuote) {
-      fwrite(value.c_str(), 1, value.size(), this->fp);
+      fwrite_unlocked(value.c_str(), 1, value.size(), this->fp);
     } else {
-      fputc('"', this->fp);
+      fputc_unlocked('"', this->fp);
       size_t nWritten = 0;
       while (nWritten < value.size()) {
         const size_t quote_pos = value.find('"', nWritten);
         if (quote_pos == std::string::npos) {
           // No more quotation marks
-          fwrite(value.c_str() + nWritten, 1, value.size() - nWritten, this->fp);
+          fwrite_unlocked(value.c_str() + nWritten, 1, value.size() - nWritten, this->fp);
           nWritten = value.size();
         } else {
-          fwrite(value.c_str() + nWritten, 1, quote_pos - nWritten, this->fp);
-          fwrite("\"\"", 1, 2, this->fp);
+          fwrite_unlocked(value.c_str() + nWritten, 1, quote_pos - nWritten, this->fp);
+          fwrite_unlocked("\"\"", 1, 2, this->fp);
           nWritten = quote_pos + 1;
         }
       }
-      fputc('"', this->fp);
+      fputc_unlocked('"', this->fp);
     }
   }
 
@@ -301,30 +301,30 @@ struct JsonPrinter : public Printer {
   JsonPrinter(FILE* aFp) : Printer(aFp) {}
 
   void writeFileHeader() override {
-    fputc('[', this->fp); // begin array
+    fputc_unlocked('[', this->fp); // begin array
   }
 
   void writeFileFooter() override {
-    fputc(']', this->fp); // end array
+    fputc_unlocked(']', this->fp); // end array
   }
 
   void writeRecordStart(bool isFirst) override {
     if (!isFirst) {
-      fputc(',', this->fp);
+      fputc_unlocked(',', this->fp);
     }
-    fputc('{', this->fp); // begin object
+    fputc_unlocked('{', this->fp); // begin object
   }
 
   void writeRecordStop() override {
-    fputc('}', this->fp); // end object
+    fputc_unlocked('}', this->fp); // end object
   }
 
   void writeFieldStart() override {
     if (this->columnIndex > 0) {
-      fputc(',', this->fp);
+      fputc_unlocked(',', this->fp);
     }
     this->writeString(*this->columnName);
-    fputc(':', this->fp);
+    fputc_unlocked(':', this->fp);
   }
 
   void writeHeaderField() override {
@@ -332,36 +332,36 @@ struct JsonPrinter : public Printer {
   }
 
   virtual void writeNull() override {
-    fwrite("null", 1, 4, this->fp);
+    fwrite_unlocked("null", 1, 4, this->fp);
   }
 
   void writeString(const std::string& value) override {
-    fputc('"', this->fp);
+    fputc_unlocked('"', this->fp);
     for (const char& c: value) {
       // assume UTF-8 -- it's okay to ascii-compare it
       switch (c) {
-        case '"': fwrite("\\\"", 1, 2, this->fp); break;
-        case '\\': fwrite("\\\\", 1, 2, this->fp); break;
-        case '\b': fwrite("\\b", 1, 2, this->fp); break;
-        case '\f': fwrite("\\f", 1, 2, this->fp); break;
-        case '\n': fwrite("\\n", 1, 2, this->fp); break;
-        case '\r': fwrite("\\r", 1, 2, this->fp); break;
-        case '\t': fwrite("\\t", 1, 2, this->fp); break;
+        case '"': fwrite_unlocked("\\\"", 1, 2, this->fp); break;
+        case '\\': fwrite_unlocked("\\\\", 1, 2, this->fp); break;
+        case '\b': fwrite_unlocked("\\b", 1, 2, this->fp); break;
+        case '\f': fwrite_unlocked("\\f", 1, 2, this->fp); break;
+        case '\n': fwrite_unlocked("\\n", 1, 2, this->fp); break;
+        case '\r': fwrite_unlocked("\\r", 1, 2, this->fp); break;
+        case '\t': fwrite_unlocked("\\t", 1, 2, this->fp); break;
         default:
           if ('\0' <= c && c <= '\x1f') {
             fprintf(this->fp, "\\u%04hhd", c);
           } else {
-            fputc(c, this->fp);
+            fputc_unlocked(c, this->fp);
           }
       }
     }
-    fputc('"', this->fp);
+    fputc_unlocked('"', this->fp);
   }
 
   void writeTimestamp(int64_t value, arrow::TimeUnit::type timeUnit) override {
-    fputc('"', this->fp);
+    fputc_unlocked('"', this->fp);
     this->writeRawShortISO8601UTCTimestamp(value, timeUnit);
-    fputc('"', this->fp);
+    fputc_unlocked('"', this->fp);
   }
 };
 

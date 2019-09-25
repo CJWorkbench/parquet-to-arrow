@@ -1,3 +1,8 @@
+v0.0.4 - 2019-09-25
+-------------------
+
+* `parquet-to-text-stream`: use unlocked stdio, for speed
+
 v0.0.3 - 2019-09-25
 -------------------
 
