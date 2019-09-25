@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 from pathlib import Path
 import subprocess
 import numpy as np
@@ -7,13 +8,21 @@ import pyarrow
 from .util import parquet_file
 
 
+def canonical_json(data) -> str:
+    return json.dumps(
+        data,
+        ensure_ascii=False,
+        check_circular=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+
+
 def do_convert(parquet_path: Path, format: str) -> str:
     try:
         completed = subprocess.run(
             ["/usr/bin/parquet-to-text-stream", str(parquet_path), format],
             capture_output=True,
-            encoding="utf-8",
-            errors="replace",
             check=True,
         )
     except subprocess.CalledProcessError as err:
@@ -27,7 +36,7 @@ def do_convert(parquet_path: Path, format: str) -> str:
     return completed.stdout
 
 
-def _test_convert_via_arrow(table: pyarrow.Table, expect_csv: str) -> None:
+def _test_convert_via_arrow(table: pyarrow.Table, expect_csv, expect_json) -> None:
     """
     Convert `table` from Arrow to parquet; then stream the Parquet file.
 
@@ -35,7 +44,16 @@ def _test_convert_via_arrow(table: pyarrow.Table, expect_csv: str) -> None:
     """
     with parquet_file(table) as parquet_path:
         csv = do_convert(parquet_path, "csv")
+        if isinstance(expect_csv, str):
+            expect_csv = expect_csv.encode("utf-8")
         assert csv == expect_csv
+
+        json_text = do_convert(parquet_path, "json")
+        if isinstance(expect_json, list):
+            expect_json = canonical_json(expect_json)
+        if isinstance(expect_json, str):
+            expect_json = expect_json.encode("utf-8")
+        assert json_text == expect_json
 
 
 def test_convert_int32_int64():
@@ -49,6 +67,12 @@ def test_convert_int32_int64():
             }
         ),
         "i64,i32\n1,1\n4611686018427387904,1073741824\n-2,-2\n,",
+        [
+            {"i64": 1, "i32": 1},
+            {"i64": 4611686018427387904, "i32": 1073741824},
+            {"i64": -2, "i32": -2},
+            {"i64": None, "i32": None},
+        ],
     )
 
 
@@ -63,6 +87,12 @@ def test_convert_int8_int16():
             }
         ),
         "i8,i16\n1,1\n-32,-320\n120,31022\n,",
+        [
+            {"i8": 1, "i16": 1},
+            {"i8": -32, "i16": -320},
+            {"i8": 120, "i16": 31022},
+            {"i8": None, "i16": None},
+        ],
     )
 
 
@@ -76,6 +106,7 @@ def test_convert_uint64():
             }
         ),
         "u64\n1\n9223372039002259456\n",
+        [{"u64": 1}, {"u64": 9223372039002259456}, {"u64": None}],
     )
 
 
@@ -91,6 +122,11 @@ def test_convert_uint8_uint16_uint32():
             }
         ),
         "u8,u16,u32\n1,1,1\n138,38383,4294967291\n,,",
+        [
+            dict(u8=1, u16=1, u32=1),
+            dict(u8=138, u16=38383, u32=4294967291),
+            dict(u8=None, u16=None, u32=None),
+        ],
     )
 
 
@@ -128,6 +164,7 @@ def test_convert_f32_f64():
             }
         ),
         "f32,f64\n0.12314,0.12314\n10000000000000000000,1e+52\n,\n,\n,\n,",
+        r'[{"f32":0.12314,"f64":0.12314},{"f32":10000000000000000000,"f64":1e+52},{"f32":null,"f64":null},{"f32":null,"f64":null},{"f32":null,"f64":null},{"f32":null,"f64":null}]',
     )
 
 
@@ -135,11 +172,20 @@ def test_convert_text():
     _test_convert_via_arrow(
         pyarrow.table(
             {
-                "A": ["x", None, "y", "a,b", "c\nd", 'a"b"c'],
-                "B": ["", "a", "b", "c", "d", "e"],
+                "A": ["x", None, "y", "a,b", "c\nd", 'a"\\b"c', "0\x001\x022\r3\n4\t5"],
+                "B": ["", "a", "b", "c", "d", "e", "f"],
             }
         ),
-        """A,B\nx,\n,a\ny,b\n"a,b",c\n"c\nd",d\n"a""b""c",e""",
+        """A,B\nx,\n,a\ny,b\n"a,b",c\n"c\nd",d\n"a""\\b""c",e\n"0\x001\x022\r3\n4\t5",f""",
+        [
+            dict(A="x", B=""),
+            dict(A=None, B="a"),
+            dict(A="y", B="b"),
+            dict(A="a,b", B="c"),
+            dict(A="c\nd", B="d"),
+            dict(A='a"\\b"c', B="e"),
+            dict(A="0\x001\x022\r3\n4\t5", B="f"),
+        ],
     )
 
 
@@ -148,7 +194,10 @@ def test_convert_text_dictionaries():
         {"A": pyarrow.array(["x", "x", "y", "x", None, "y"]).dictionary_encode()}
     )
     with parquet_file(table, use_dictionary=["A"]) as parquet_path:
-        assert do_convert(parquet_path, "csv") == "A\nx\nx\ny\nx\n\ny"
+        assert do_convert(parquet_path, "csv") == b"A\nx\nx\ny\nx\n\ny"
+        assert do_convert(parquet_path, "json") == canonical_json(
+            [{"A": "x"}, {"A": "x"}, {"A": "y"}, {"A": "x"}, {"A": None}, {"A": "y"}]
+        ).encode("utf-8")
 
 
 def test_convert_na_only_categorical():
@@ -156,7 +205,8 @@ def test_convert_na_only_categorical():
         {"A": pyarrow.array([None], type=pyarrow.string()).dictionary_encode()}
     )
     with parquet_file(table, use_dictionary=["A"]) as parquet_path:
-        assert do_convert(parquet_path, "csv") == "A\n"
+        assert do_convert(parquet_path, "csv") == b"A\n"
+        assert do_convert(parquet_path, "json") == b'[{"A":null}]'
 
 
 def test_convert_zero_row_groups():
@@ -164,18 +214,21 @@ def test_convert_zero_row_groups():
         [], schema=pyarrow.schema([("A", pyarrow.string()), ("B", pyarrow.int32())])
     )
     with parquet_file(table) as parquet_path:
-        assert do_convert(parquet_path, "csv") == "A,B"
+        assert do_convert(parquet_path, "csv") == b"A,B"
+        assert do_convert(parquet_path, "json") == b"[]"
 
 
 def test_convert_zero_rows():
-    table = pyarrow.table(
-        {
-            "A": pyarrow.array([], type=pyarrow.string()),
-            "B": pyarrow.array([], type=pyarrow.int32()),
-        }
+    _test_convert_via_arrow(
+        pyarrow.table(
+            {
+                "A": pyarrow.array([], type=pyarrow.string()),
+                "B": pyarrow.array([], type=pyarrow.int32()),
+            }
+        ),
+        "A,B",
+        "[]",
     )
-    with parquet_file(table) as parquet_path:
-        assert do_convert(parquet_path, "csv") == "A,B"
 
 
 # def test_convert_datetime_s():
@@ -201,6 +254,15 @@ def test_convert_datetime_ms():
             }
         ),
         "ms\n2019-03-04\n2019-03-04T05:00:00Z\n2019-03-04T05:06:00Z\n2019-03-04T05:06:07Z\n2019-03-04T00:00:00.008Z\n\n",
+        [
+            {"ms": "2019-03-04"},
+            {"ms": "2019-03-04T05:00:00Z"},
+            {"ms": "2019-03-04T05:06:00Z"},
+            {"ms": "2019-03-04T05:06:07Z"},
+            {"ms": "2019-03-04T00:00:00.008Z"},
+            {"ms": None},
+            {"ms": None},
+        ],
     )
 
 
@@ -223,6 +285,15 @@ def test_convert_datetime_us():
             }
         ),
         "us\n2019-03-04\n2019-03-04T05:00:00Z\n2019-03-04T05:06:00Z\n2019-03-04T05:06:07Z\n2019-03-04T05:06:07.008Z\n2019-03-04T05:06:07.000008Z\n",
+        [
+            {"us": "2019-03-04"},
+            {"us": "2019-03-04T05:00:00Z"},
+            {"us": "2019-03-04T05:06:00Z"},
+            {"us": "2019-03-04T05:06:07Z"},
+            {"us": "2019-03-04T05:06:07.008Z"},
+            {"us": "2019-03-04T05:06:07.000008Z"},
+            {"us": None},
+        ],
     )
 
 
@@ -245,4 +316,13 @@ def test_convert_datetime_ns():
             }
         ),
         "ns\n2019-03-04\n2019-03-04T05:00:00Z\n2019-03-04T05:06:00Z\n2019-03-04T05:06:07Z\n2019-03-04T05:06:07.008Z\n2019-03-04T05:06:07.000008Z\n2019-03-04T05:06:07.000000008Z",
+        [
+            {"ns": "2019-03-04"},
+            {"ns": "2019-03-04T05:00:00Z"},
+            {"ns": "2019-03-04T05:06:00Z"},
+            {"ns": "2019-03-04T05:06:07Z"},
+            {"ns": "2019-03-04T05:06:07.008Z"},
+            {"ns": "2019-03-04T05:06:07.000008Z"},
+            {"ns": "2019-03-04T05:06:07.000000008Z"},
+        ],
     )
