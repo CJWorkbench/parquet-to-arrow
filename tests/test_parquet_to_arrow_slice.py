@@ -1,7 +1,6 @@
 from datetime import datetime
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import numpy as np
 import pyarrow
@@ -72,7 +71,7 @@ def test_read_write_text_categorical():
     table = pyarrow.table(
         {"A": pyarrow.array(["x", None, "y", "x"]).dictionary_encode()}
     )
-    with parquet_file(table) as parquet_path:
+    with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
         result = do_convert(parquet_path, "0-10", "0-200")
         expected = pyarrow.table({"A": ["x", None, "y", "x"]})
         assert_table_equals(result, expected)
@@ -88,7 +87,7 @@ def test_na_only_categorical_has_object_dtype():
     table = pyarrow.table(
         {"A": pyarrow.array([None], type=pyarrow.string()).dictionary_encode()}
     )
-    with parquet_file(table) as parquet_path:
+    with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
         result = do_convert(parquet_path, "0-10", "0-200")
         expected = pyarrow.table({"A": pyarrow.array([None], type=pyarrow.string())})
         assert_table_equals(result, expected)
@@ -103,7 +102,7 @@ def test_empty_categorical_has_object_dtype():
             )
         }
     )
-    with parquet_file(table) as parquet_path:
+    with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
         result = do_convert(parquet_path, "0-10", "0-200")
         expected = pyarrow.table({"A": pyarrow.array([], type=pyarrow.string())})
         assert_table_equals(result, expected)

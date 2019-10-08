@@ -193,7 +193,7 @@ def test_convert_text_dictionaries():
     table = pyarrow.table(
         {"A": pyarrow.array(["x", "x", "y", "x", None, "y"]).dictionary_encode()}
     )
-    with parquet_file(table, use_dictionary=["A"]) as parquet_path:
+    with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
         assert do_convert(parquet_path, "csv") == b"A\nx\nx\ny\nx\n\ny"
         assert do_convert(parquet_path, "json") == canonical_json(
             [{"A": "x"}, {"A": "x"}, {"A": "y"}, {"A": "x"}, {"A": None}, {"A": "y"}]
@@ -204,7 +204,7 @@ def test_convert_na_only_categorical():
     table = pyarrow.table(
         {"A": pyarrow.array([None], type=pyarrow.string()).dictionary_encode()}
     )
-    with parquet_file(table, use_dictionary=["A"]) as parquet_path:
+    with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
         assert do_convert(parquet_path, "csv") == b"A\n"
         assert do_convert(parquet_path, "json") == b'[{"A":null}]'
 

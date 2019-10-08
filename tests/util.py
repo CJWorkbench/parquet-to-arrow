@@ -14,24 +14,30 @@ def assert_table_equals(actual: pyarrow.Table, expected: pyarrow.Table) -> None:
     assertEqual(actual.num_rows, expected.num_rows)
     assertEqual(actual.num_columns, expected.num_columns)
 
-    for column_number, actual_column, expected_column in zip(
-        range(actual.num_columns), actual.columns, expected.columns
+    for (
+        column_number,
+        actual_name,
+        actual_column,
+        expected_name,
+        expected_column,
+    ) in zip(
+        range(actual.num_columns),
+        actual.column_names,
+        actual.columns,
+        expected.column_names,
+        expected.columns,
     ):
         assertEqual(
-            actual_column.name,
-            expected_column.name,
-            f"column {column_number} has wrong name",
+            actual_name, expected_name, f"column {column_number} has wrong name"
         )
         assertEqual(
             actual_column.type,
             expected_column.type,
-            f"column {actual_column.name} has wrong type",
+            f"column {actual_name} has wrong type",
         )
-        actual_data = actual_column.data.to_pandas()  # numpy.ndarray
-        expected_data = expected_column.data.to_pandas()  # numpy.ndarray
-        assert_equal(
-            actual_data, expected_data, f"column {actual_column.name} has wrong data"
-        )
+        actual_data = actual_column.to_pandas().values  # numpy.ndarray
+        expected_data = expected_column.to_pandas().values  # numpy.ndarray
+        assert_equal(actual_data, expected_data, f"column {actual_name} has wrong data")
 
 
 @contextmanager

@@ -11,13 +11,14 @@
 #include <ctime>
 
 #include <arrow/api.h>
-#include <arrow/array/concatenate.h>
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
 #include <double-conversion/double-conversion.h> // already a dep of arrow; and printf won't do
 #include <parquet/api/reader.h>
 #include <parquet/arrow/reader.h>
 #include <parquet/exception.h>
+
+#include "common.h"
 
 
 // Batch size determines RAM usage and I/O.
@@ -29,13 +30,6 @@
 // [adamhooper, 2019-09-23] my intuition is that the client side is slow;
 // therefore, I lean towards low RAM, high seeking.
 static const int BATCH_SIZE = 100;
-
-static inline void ASSERT_ARROW_OK(arrow::Status status, const char* message) {
-  if (!status.ok()) {
-    std::cerr << "Failure " << message << ": " << status.ToString() << std::endl;
-    std::terminate();
-  }
-}
 
 
 // [adamhooper, 2019-09-25] a shoddy use of inheritance here
@@ -369,29 +363,37 @@ struct JsonPrinter : public Printer {
 struct ColumnIterator {
   int columnIndex;
   const std::string name;
+  int rowIndex;
+  int nRows;
   std::unique_ptr<parquet::arrow::ColumnReader> columnReader;
   int batchIndex;
   std::shared_ptr<arrow::Array> batch;
 
-  ColumnIterator(int aColumnIndex, const std::string& aName, std::unique_ptr<parquet::arrow::ColumnReader> aReader)
-    : columnIndex(aColumnIndex), name(aName), columnReader(std::move(aReader)), batchIndex(0), batch(nullptr)
+  ColumnIterator(int aColumnIndex, const std::string& aName, int aNRows, std::unique_ptr<parquet::arrow::ColumnReader> aReader)
+    : columnIndex(aColumnIndex), name(aName), rowIndex(-1), nRows(aNRows), columnReader(std::move(aReader)), batchIndex(-1), batch(nullptr)
   {
   }
 
   bool advanceToNextValueIfAvailable() {
     this->batchIndex++;
+    this->rowIndex++;
+    if (this->rowIndex == this->nRows) {
+      if (this->batch) {
+        this->batch.reset();
+      }
+      return false;
+    }
     if (this->batch.get() == nullptr || this->batchIndex >= this->batch->length()) {
       std::shared_ptr<arrow::ChunkedArray> columnChunks;
-      ASSERT_ARROW_OK(this->columnReader->NextBatch(BATCH_SIZE, &columnChunks), "reading batch");
+      ASSERT_ARROW_OK(this->columnReader->NextBatch(std::min(BATCH_SIZE, this->nRows - this->rowIndex), &columnChunks), "reading batch");
       if (columnChunks.get() == nullptr || columnChunks->length() == 0) {
         this->batch.reset();
         return false;
       } else {
-        if (columnChunks->num_chunks() == 1) {
-            this->batch = columnChunks->chunk(0);
-        } else {
-            ASSERT_ARROW_OK(Concatenate(columnChunks->chunks(), arrow::default_memory_pool(), &this->batch), "concatenating column chunks");
-        }
+        ASSERT_ARROW_OK(chunkedArrayToArray(*columnChunks, &this->batch), "concatenating column chunks");
+        // If it's a dict, decode it. (It would be nice to decode one value at a time, but that's
+        // hard to achieve with the Arrow API. And it's not decoding in batches is _bad_....)
+        ASSERT_ARROW_OK(decodeIfDictionary(&this->batch), "decoding dictionary values");
         this->batchIndex = 0;
       }
     }
@@ -421,11 +423,13 @@ static void streamParquet(const std::string& path, const std::string& format, FI
   std::shared_ptr<arrow::Schema> schema;
   ASSERT_ARROW_OK(arrowReader->GetSchema(&schema), "parsing Parquet schema");
 
+  int nRows = arrowReader->parquet_reader()->metadata()->num_rows();
+
   std::vector<std::unique_ptr<ColumnIterator>> columnIterators(schema->num_fields());
   for (int i = 0; i < columnIterators.size(); i++) {
     std::unique_ptr<parquet::arrow::ColumnReader> columnReader;
     ASSERT_ARROW_OK(arrowReader->GetColumn(i, &columnReader), "getting column");
-    columnIterators[i].reset(new ColumnIterator(i, schema->field(i)->name(), std::move(columnReader)));
+    columnIterators[i].reset(new ColumnIterator(i, schema->field(i)->name(), nRows, std::move(columnReader)));
   }
 
   std::unique_ptr<Printer> printer;
