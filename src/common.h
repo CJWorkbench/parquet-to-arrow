@@ -1,4 +1,4 @@
-#include <exception>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <arrow/api.h>
@@ -10,7 +10,7 @@ static inline void ASSERT_ARROW_OK(arrow::Status status, const char* message)
 {
   if (!status.ok()) {
     std::cerr << "Failure " << message << ": " << status.ToString() << std::endl;
-    std::terminate();
+    std::_Exit(1);
   }
 }
 

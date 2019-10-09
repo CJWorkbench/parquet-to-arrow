@@ -38,7 +38,7 @@ ENV Snappy_DIR "/src/apache-arrow-0.15.0/cpp/snappy_ep/src/snappy_ep-install/lib
 
 FROM python:3.7.4-buster AS python-dev
 
-RUN pip install pyarrow==0.15.0 pytest pandas==0.25.1
+RUN pip install pyarrow==0.15.0 pytest pandas==0.25.1 fastparquet==0.3.2
 
 RUN mkdir /app
 WORKDIR /app
@@ -47,7 +47,7 @@ WORKDIR /app
 FROM cpp-builddeps AS cpp-build
 
 RUN mkdir -p /app/src
-RUN touch /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc
+RUN touch /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc
 WORKDIR /app
 COPY CMakeLists.txt /app
 RUN cmake -DCMAKE_BUILD_TYPE=Debug .
@@ -59,13 +59,15 @@ RUN make
 
 FROM python-dev AS test
 
-COPY . /app
+COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
 COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
 COPY --from=cpp-build /app/parquet-to-text-stream /usr/bin/parquet-to-text-stream
+COPY . /app
 WORKDIR /app
 RUN pytest -vv
 
 
 FROM scratch AS dist
+COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
 COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
 COPY --from=cpp-build /app/parquet-to-text-stream /usr/bin/parquet-to-text-stream

@@ -4,7 +4,7 @@ import os
 import tempfile
 from typing import ContextManager
 import unittest
-from numpy.testing import assert_equal  # [None, "x"] == [None, "x"]
+from pandas.testing import assert_series_equal
 import pyarrow
 import pyarrow.parquet
 
@@ -35,9 +35,11 @@ def assert_table_equals(actual: pyarrow.Table, expected: pyarrow.Table) -> None:
             expected_column.type,
             f"column {actual_name} has wrong type",
         )
-        actual_data = actual_column.to_pandas().values  # numpy.ndarray
-        expected_data = expected_column.to_pandas().values  # numpy.ndarray
-        assert_equal(actual_data, expected_data, f"column {actual_name} has wrong data")
+        actual_data = actual_column.to_pandas()
+        expected_data = expected_column.to_pandas()
+        assert_series_equal(
+            actual_data, expected_data, f"column {actual_name} has wrong data"
+        )
 
 
 @contextmanager

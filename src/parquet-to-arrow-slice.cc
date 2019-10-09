@@ -131,7 +131,7 @@ int main(int argc, char** argv) {
   if (argc != 5) {
     std::cerr << "Usage: " << argv[0] << " PARQUET_FILENAME COL0-COLN ROW0-ROWN ARROW_FILENAME" << std::endl;
     std::cerr << std::endl;
-    std::cerr << "For instance: " << argv[0] << " table.parquet 0-16 200-400" << std::endl;
+    std::cerr << "For instance: " << argv[0] << " table.parquet 0-16 200-400 table.arrow" << std::endl;
     std::cerr << "Rows and columns are numbered like C arrays. Out-of-bounds indices are ignored." << std::endl;
     return 1;
   }

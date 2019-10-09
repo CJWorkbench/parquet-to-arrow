@@ -1,13 +1,11 @@
-//#include <algorithm>
-//#include <exception>
 #include <iostream>
 #include <memory>
-//#include <numeric>
 #include <string>
 #include <vector>
 #include <cmath>
 #include <cinttypes>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 
 #include <arrow/api.h>
@@ -92,7 +90,7 @@ struct Printer : public arrow::ArrayVisitor {
         break;
       default:
         std::cerr << "Failure: unsupported time unit " << timeUnit << std::endl;
-        std::terminate();
+        std::_Exit(1);
     }
 
     struct tm time = { .tm_sec=0, .tm_min=0, .tm_hour=0, .tm_mday=0, .tm_mon=0, .tm_year=0, .tm_wday=0, .tm_yday=0, .tm_isdst=0 };

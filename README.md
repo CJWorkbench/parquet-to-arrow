@@ -25,6 +25,23 @@ to these binaries.
 Binaries
 ========
 
+parquet-to-arrow
+----------------
+
+*Purpose*: convert a Parquet file to Arrow format.
+
+*Usage*: `parquet-to-arrow input.parquet output.arrow`
+
+*Features*:
+
+* _Preserve dictionary encoding_: Parquet dictionaries become Arrow
+  dictionaries. See https://arrow.apache.org/blog/2019/09/05/faster-strings-cpp-parquet/
+
+You may choose to invoke `parquet-to-arrow` even from Python, where `pyarrow`
+has the same features. That way, if the kernel out-of-memory killer kills
+`parquet-to-arrow`, your Python code can handle the error. (TODO limit RAM by
+converting and writing one column at a time.)
+
 parquet-to-arrow-slice
 ----------------------
 
@@ -38,8 +55,8 @@ rows).
 
 * _Manageable RAM usage_: in large datasets, never hold an entire column
   in memory.
-* _Auto-convert UTF-8 dictionaries_: this tool is tuned to small numbers
-  of rows; dictionaries are unneeded hassle.
+* _Auto-convert UTF-8 dictionaries_ to string columns: this tool is tuned to
+  small numbers of rows; dictionaries are unneeded hassle.
 
 *TODO*:
 

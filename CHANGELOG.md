@@ -1,3 +1,14 @@
+v0.1.1 - 2019-10-09
+-------------------
+
+* `parquet-to-arrow`: convert the whole file.
+
+v0.1.0 - 2019-10-08
+-------------------
+
+* Upgrade to Arrow 0.15. Arrow files written by `parquet-to-arrow-slice` can
+  only be read by Arrow 0.15.
+
 v0.0.4 - 2019-09-25
 -------------------
 
