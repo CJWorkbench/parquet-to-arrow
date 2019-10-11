@@ -81,10 +81,11 @@ parquet-to-text-stream
   string; all but the most wonky floats are formatted as decimal; timestamps
   are ISO8601-formatted with the fewest characters possible (e.g., "2019-09-24"
   instead of "2019-09-24T00:00:00.000000000Z")
-
-*TODO*:
-
-* `json` format
+* _JSON Output_ (choose `json` format): null/inf/-inf/NaN are all output as
+  `null`; floats are formatted according to
+  [ECMAScript Standard](https://www.ecma-international.org/ecma-262/6.0/#sec-tostring-applied-to-the-number-type);
+  timestamps are ISO8601-formatted Strings with the fewest characters possible
+  (e.g., "2019-09-24" instead of "2019-09-24T00:00:00.000000000Z")
 
 Developing
 ==========
