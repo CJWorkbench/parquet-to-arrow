@@ -1,3 +1,10 @@
+v0.1.2 - 2019-10-09
+-------------------
+
+* `parquet-to-arrow`: patch Arrow bug
+   https://issues.apache.org/jira/browse/ARROW-6861 so Parquet files written
+   by Arrow 0.14.1 can be converted, preserving dictionaries.
+
 v0.1.1 - 2019-10-09
 -------------------
 

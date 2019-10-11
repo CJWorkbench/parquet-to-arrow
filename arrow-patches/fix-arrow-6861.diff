@@ -1,0 +1,28 @@
+diff --git a/cpp/src/arrow/array/builder_dict.h b/cpp/src/arrow/array/builder_dict.h
+index 665867a2a..5bcc1e34a 100644
+--- a/cpp/src/arrow/array/builder_dict.h
++++ b/cpp/src/arrow/array/builder_dict.h
+@@ -266,6 +266,7 @@ class DictionaryBuilderBase : public ArrayBuilder {
+ 
+     // Update internals for further uses of this DictionaryBuilder
+     delta_offset_ = memo_table_->size();
++    ArrayBuilder::Reset(); // capacity_, length_, null_count_, null_bitmap_builder_
+     indices_builder_.Reset();
+ 
+     return Status::OK();
+@@ -380,6 +381,7 @@ class DictionaryBuilder : public internal::DictionaryBuilderBase<AdaptiveIntBuil
+                        const uint8_t* valid_bytes = NULLPTR) {
+     int64_t null_count_before = this->indices_builder_.null_count();
+     ARROW_RETURN_NOT_OK(this->indices_builder_.AppendValues(values, length, valid_bytes));
++    this->capacity_ = this->indices_builder_.capacity();
+     this->length_ += length;
+     this->null_count_ += this->indices_builder_.null_count() - null_count_before;
+     return Status::OK();
+@@ -402,6 +404,7 @@ class Dictionary32Builder : public internal::DictionaryBuilderBase<Int32Builder,
+                        const uint8_t* valid_bytes = NULLPTR) {
+     int64_t null_count_before = this->indices_builder_.null_count();
+     ARROW_RETURN_NOT_OK(this->indices_builder_.AppendValues(values, length, valid_bytes));
++    this->capacity_ = this->indices_builder_.capacity();
+     this->length_ += length;
+     this->null_count_ += this->indices_builder_.null_count() - null_count_before;
+     return Status::OK();

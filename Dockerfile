@@ -1,5 +1,13 @@
 FROM debian:buster AS cpp-builddeps
 
+# DEBUG SYMBOLS: to build with debug symbols (which help gdb), do these
+# changes (but don't commit them):
+#
+# * in Dockerfile, ensure libstdc++6-8-dbg is installed (this, we commit)
+# * in Dockerfile, set -DCMAKE_BUILD_TYPE=Debug when building Arrow
+# * in Dockerfile, set -DCMAKE_BUILD_TYPE=Debug when building parquet-to-arrow
+# * in CMakeLists.txt, find the library "libthriftd.a" instead of "libthrift.a"
+
 RUN true \
       && apt-get update \
       && apt-get install -y \
@@ -15,18 +23,23 @@ RUN true \
           libboost-filesystem-dev \
           libboost-regex-dev \
           libboost-system-dev \
+          libstdc++6-8-dbg \
           pkg-config \
           python \
           tar \
       && true
+
+COPY arrow-patches/ /arrow-patches/
 
 RUN true \
       && mkdir -p /src \
       && cd /src \
       && curl -Oapache-arrow-0.15.0.tar.gz --location http://apache.mirror.gtcomm.net/arrow/arrow-0.15.0/apache-arrow-0.15.0.tar.gz \
       && tar zxf apache-arrow-0.15.0.tar.gz \
-      && cd apache-arrow-0.15.0/cpp \
-      && cmake -DARROW_PARQUET=ON -DARROW_COMPUTE=ON -DARROW_OPTIONAL_INSTALL=ON -DARROW_BUILD_STATIC=ON -DARROW_BUILD_SHARED=OFF . \
+      && cd apache-arrow-0.15.0 \
+      && for patch in $(find /arrow-patches/*.diff); do patch --verbose -p1 <$patch; done \
+      && cd cpp \
+      && cmake -DARROW_PARQUET=ON -DARROW_COMPUTE=ON -DARROW_OPTIONAL_INSTALL=ON -DARROW_BUILD_STATIC=ON -DARROW_BUILD_SHARED=OFF -DCMAKE_BUILD_TYPE=Release . \
       && make -j4 arrow \
       && make -j4 parquet \
       && make install
@@ -50,7 +63,7 @@ RUN mkdir -p /app/src
 RUN touch /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc
 WORKDIR /app
 COPY CMakeLists.txt /app
-RUN cmake -DCMAKE_BUILD_TYPE=Debug .
+RUN cmake -DCMAKE_BUILD_TYPE=Release .
 #RUN cmake .
 
 COPY src/ /app/src/
@@ -62,7 +75,7 @@ FROM python-dev AS test
 COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
 COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
 COPY --from=cpp-build /app/parquet-to-text-stream /usr/bin/parquet-to-text-stream
-COPY . /app
+COPY tests/ /app/tests/
 WORKDIR /app
 RUN pytest -vv
 
