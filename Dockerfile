@@ -37,7 +37,7 @@ RUN true \
       && curl -Oapache-arrow-0.15.0.tar.gz --location http://apache.mirror.gtcomm.net/arrow/arrow-0.15.0/apache-arrow-0.15.0.tar.gz \
       && tar zxf apache-arrow-0.15.0.tar.gz \
       && cd apache-arrow-0.15.0 \
-      && for patch in $(find /arrow-patches/*.diff); do patch --verbose -p1 <$patch; done \
+      && for patch in $(find /arrow-patches/*.diff | sort); do patch --verbose -p1 <$patch; done \
       && cd cpp \
       && cmake -DARROW_PARQUET=ON -DARROW_COMPUTE=ON -DARROW_OPTIONAL_INSTALL=ON -DARROW_BUILD_STATIC=ON -DARROW_BUILD_SHARED=OFF -DCMAKE_BUILD_TYPE=Release . \
       && make -j4 arrow \
@@ -60,7 +60,7 @@ WORKDIR /app
 FROM cpp-builddeps AS cpp-build
 
 RUN mkdir -p /app/src
-RUN touch /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc
+RUN touch /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc /app/src/common.cc
 WORKDIR /app
 COPY CMakeLists.txt /app
 RUN cmake -DCMAKE_BUILD_TYPE=Release .

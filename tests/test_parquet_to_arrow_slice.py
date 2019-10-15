@@ -128,6 +128,15 @@ def test_skip_rows_at_start():
         assert_table_equals(result, pyarrow.table({"A": [200, 201, 202]}))
 
 
+def test_skip_dictionary_rows_at_start():
+    table = pyarrow.table(
+        {"A": pyarrow.array(str(x) for x in range(203)).dictionary_encode()}
+    )
+    with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
+        result = do_convert(parquet_path, "0-10", "200-203")
+        assert_table_equals(result, pyarrow.table({"A": ["200", "201", "202"]}))
+
+
 def test_skip_more_rows_than_page_size_at_start():
     table = pyarrow.table({"A": list(range(10008))})
     with parquet_file(table) as parquet_path:

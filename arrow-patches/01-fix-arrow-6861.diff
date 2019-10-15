@@ -3,11 +3,10 @@ index 665867a2a..5bcc1e34a 100644
 --- a/cpp/src/arrow/array/builder_dict.h
 +++ b/cpp/src/arrow/array/builder_dict.h
 @@ -266,6 +266,7 @@ class DictionaryBuilderBase : public ArrayBuilder {
- 
      // Update internals for further uses of this DictionaryBuilder
      delta_offset_ = memo_table_->size();
-+    ArrayBuilder::Reset(); // capacity_, length_, null_count_, null_bitmap_builder_
      indices_builder_.Reset();
++    ArrayBuilder::Reset(); // capacity_, length_, null_count_, null_bitmap_builder_
  
      return Status::OK();
 @@ -380,6 +381,7 @@ class DictionaryBuilder : public internal::DictionaryBuilderBase<AdaptiveIntBuil

@@ -28,7 +28,8 @@ def do_convert(parquet_path: Path, format: str) -> str:
     except subprocess.CalledProcessError as err:
         # Rewrite error so it's easy to read in test-result stack trace
         raise RuntimeError(
-            "Process failed with code %d: %s" % (err.returncode, err.output)
+            "Process failed with code %d: %s"
+            % (err.returncode, err.stdout + err.stderr)
         ) from None
 
     if len(completed.stderr):
@@ -197,6 +198,42 @@ def test_convert_text_dictionaries():
         assert do_convert(parquet_path, "csv") == b"A\nx\nx\ny\nx\n\ny"
         assert do_convert(parquet_path, "json") == canonical_json(
             [{"A": "x"}, {"A": "x"}, {"A": "y"}, {"A": "x"}, {"A": None}, {"A": "y"}]
+        ).encode("utf-8")
+
+
+def test_convert_text_over_batch_size():
+    # Seen on production:
+    # "Failure concatenating column chunks: NotImplemented: Concat with
+    # dictionary unification NYI"
+    BATCH_SIZE = 100  # copy parquet-to-text-stream.cc
+
+    table = pyarrow.table(
+        {"A": pyarrow.array(["x"] * BATCH_SIZE + ["y", "x", None, "y"])}
+    )
+    with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
+        assert do_convert(parquet_path, "csv") == b"A" + (b"\nx" * 100) + b"\ny\nx\n\ny"
+        assert do_convert(parquet_path, "json") == canonical_json(
+            ([{"A": "x"}] * 100) + [{"A": "y"}, {"A": "x"}, {"A": None}, {"A": "y"}]
+        ).encode("utf-8")
+
+
+def test_convert_text_dictionaries_over_batch_size():
+    # Seen on production:
+    # "Failure concatenating column chunks: NotImplemented: Concat with
+    # dictionary unification NYI"
+    BATCH_SIZE = 100  # copy parquet-to-text-stream.cc
+
+    table = pyarrow.table(
+        {
+            "A": pyarrow.array(
+                ["x"] * BATCH_SIZE + ["y", "x", None, "y"]
+            ).dictionary_encode()
+        }
+    )
+    with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
+        assert do_convert(parquet_path, "csv") == b"A" + (b"\nx" * 100) + b"\ny\nx\n\ny"
+        assert do_convert(parquet_path, "json") == canonical_json(
+            ([{"A": "x"}] * 100) + [{"A": "y"}, {"A": "x"}, {"A": None}, {"A": "y"}]
         ).encode("utf-8")
 
 

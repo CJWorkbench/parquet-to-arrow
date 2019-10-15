@@ -1,3 +1,10 @@
+v0.1.3 - 2019-10-15
+-------------------
+
+* `parquet-to-text-stream`, `parquet-to-slice`: patch Arrow bug
+   https://issues.apache.org/jira/browse/ARROW-6895 so programs correctly
+   translate dictionary-encoded columns of over 100 rows.
+
 v0.1.2 - 2019-10-09
 -------------------
 

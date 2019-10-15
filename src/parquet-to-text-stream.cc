@@ -390,7 +390,7 @@ struct ColumnIterator {
       } else {
         ASSERT_ARROW_OK(chunkedArrayToArray(*columnChunks, &this->batch), "concatenating column chunks");
         // If it's a dict, decode it. (It would be nice to decode one value at a time, but that's
-        // hard to achieve with the Arrow API. And it's not decoding in batches is _bad_....)
+        // hard to achieve with the Arrow API. Decoding a batch at a time isn't bad.)
         ASSERT_ARROW_OK(decodeIfDictionary(&this->batch), "decoding dictionary values");
         this->batchIndex = 0;
       }
