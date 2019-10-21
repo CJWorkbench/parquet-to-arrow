@@ -87,6 +87,33 @@ parquet-to-text-stream
   timestamps are ISO8601-formatted Strings with the fewest characters possible
   (e.g., "2019-09-24" instead of "2019-09-24T00:00:00.000000000Z")
 
+parquet-diff
+------------
+
+*Purpose*: exit with status code 0 only if two Parquet files are equal.
+
+*Usage*: `parquet-diff file1.parquet file2.parquet`
+
+*Features*:
+
+* _Manageable RAM usage_: only hold two columns' data in memory at a time.
+* _Strict about row groups_: two files with different row-group counts or
+  lengths are different.
+* _Strict about physical types_: int32 and int64 are different, even if their
+  values are equivalent.
+* _Strict about logical types_: int8 and int16 are different, even if they're
+  both equal int32 values in the file.
+* _Strict about timestamp precision_: columns with different `isAdjustedToUTC`
+  or `precision` are different, even if their values are equivalent.
+* _Strict about Unicode normalization_: two strings are different if their
+  UTF-8 byte sequences are different -- regardless of whether they are
+  canonically equivalent according to Unicode.
+* _Loose about column encoding_: dictionary-encoded strings and plain strings
+  are equal if their string values are equal.
+* _Loose about versions_: Parquet v1.0 and v2.0 files may compare as equal.
+* _Loose about null_: the array `[1, null, 2]` is equal to another array
+  `[1, null, 2]`, because `null == null`.
+
 Developing
 ==========
 

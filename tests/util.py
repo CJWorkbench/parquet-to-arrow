@@ -43,23 +43,35 @@ def assert_table_equals(actual: pyarrow.Table, expected: pyarrow.Table) -> None:
 
 
 @contextmanager
-def parquet_file(
-    table: pyarrow.Table, use_dictionary=False
-) -> ContextManager[pathlib.Path]:
-    """
-    Yield a filename with `table` written to a Parquet file.
-    """
+def empty_file() -> ContextManager[pathlib.Path]:
+    """Yield a path that will be deleted when exiting the context."""
     fd, filename = tempfile.mkstemp()
     try:
         os.close(fd)
-        pyarrow.parquet.write_table(
-            table,
-            filename,
-            version="2.0",  # allow int64 ns timestamps
-            compression="SNAPPY",
-            use_dictionary=use_dictionary,
-        )
         yield pathlib.Path(filename)
     finally:
         with suppress(FileNotFoundError):
             os.unlink(filename)
+
+
+@contextmanager
+def parquet_file(
+    table: pyarrow.Table,
+    # v2.0 by default -- allow int64 "ns" timestamps
+    version="2.0",
+    use_dictionary=False,
+    chunk_size=None,
+) -> ContextManager[pathlib.Path]:
+    """
+    Yield a filename with `table` written to a Parquet file.
+    """
+    with empty_file() as path:
+        pyarrow.parquet.write_table(
+            table,
+            str(path),
+            version=version,
+            compression="SNAPPY",
+            use_dictionary=use_dictionary,
+            chunk_size=chunk_size,
+        )
+        yield path

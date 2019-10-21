@@ -60,7 +60,7 @@ WORKDIR /app
 FROM cpp-builddeps AS cpp-build
 
 RUN mkdir -p /app/src
-RUN touch /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc /app/src/common.cc
+RUN touch /app/src/parquet-diff.cc /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc /app/src/common.cc
 WORKDIR /app
 COPY CMakeLists.txt /app
 RUN cmake -DCMAKE_BUILD_TYPE=Release .
@@ -72,6 +72,7 @@ RUN make
 
 FROM python-dev AS test
 
+COPY --from=cpp-build /app/parquet-diff /usr/bin/parquet-diff
 COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
 COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
 COPY --from=cpp-build /app/parquet-to-text-stream /usr/bin/parquet-to-text-stream
@@ -81,6 +82,7 @@ RUN pytest -vv
 
 
 FROM scratch AS dist
+COPY --from=cpp-build /app/parquet-diff /usr/bin/parquet-diff
 COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
 COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
 COPY --from=cpp-build /app/parquet-to-text-stream /usr/bin/parquet-to-text-stream

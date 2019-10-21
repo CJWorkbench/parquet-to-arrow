@@ -1,3 +1,8 @@
+v0.2.0 - 2019-10-21
+-------------------
+
+* `parquet-diff`: return 0 if two Parquet files are equivalent.
+
 v0.1.3 - 2019-10-15
 -------------------
 
