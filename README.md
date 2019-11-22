@@ -45,12 +45,37 @@ converting and writing one column at a time.)
 csv-to-arrow
 ------------
 
-*Purpose*: convert a CSV file to Arrow format.
+*Purpose*: convert a CSV file to Arrow format, permissively and RAM-safely.
 
-*Usage*: `csv-to-arrow input.csv output.arrow , 1000 1000000 1073741824 32768`
-(where `,` is the separator, `1000` is the maximum number of columns, `1000000`
-is the maximum number of rows, `1073741824` is the maximum number of bytes of
-UTF-8 data, and `32768` is the maximum number of UTF-8 bytes per value.
+*Usage*:
+
+```
+csv-to-arrow input.csv output.arrow \
+    --delimiter=, \
+    --max-columns=1000 \
+    --max-rows=1000000 \
+    --max-bytes-per-value=32768
+```
+
+`csv-to-arrow` holds the entire Arrot table in RAM. To restrict RAM usage,
+truncate the input file beforehand.
+
+Also, `csv-to-arrow` assumes valid UTF-8. To prevent errors, validate the input
+file beforehand.
+
+If you plan to load the output into Pandas, be aware that a Python `str` costs
+about 50 bytes of overhead. As a heuristic, loading the output Arrow file as a
+`pandas.DataFrame` costs:
+
+* The size of all the bytes of text -- roughly the size of the Arrow file
+* 8 bytes per cell for a pointer -- `8 * table.num_columns * table.num_rows`
+* 50 bytes per string --
+  `50 * (table.num_columns * table.num_rows - sum([col.null_count for col in table.columns]))`
+
+Memory savings can be found if strings are duplicated in a column:
+`column.dictionary_encode()` will save 50 bytes per duplicate; and 
+[Pandas Categoricals](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Categorical.html)
+may reduce a column's 8-byte pointers to 4 bytes per value.
 
 *Features*:
 
