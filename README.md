@@ -42,6 +42,48 @@ has the same features. That way, if the kernel out-of-memory killer kills
 `parquet-to-arrow`, your Python code can handle the error. (TODO limit RAM by
 converting and writing one column at a time.)
 
+csv-to-arrow
+------------
+
+*Purpose*: convert a CSV file to Arrow format.
+
+*Usage*: `csv-to-arrow input.csv output.arrow , 1000 1000000 1073741824 32768`
+(where `,` is the separator, `1000` is the maximum number of columns, `1000000`
+is the maximum number of rows, `1073741824` is the maximum number of bytes of
+UTF-8 data, and `32768` is the maximum number of UTF-8 bytes per value.
+
+*Features*:
+
+* _Graceful limits_: truncate the result if it's too long or wide.
+* _Truncate unwanted data_: ignore excess rows and columns; and truncate values
+  that surpass the desired limit.
+* _Skip charset checks_: assume UTF-8 input.
+* _Variable row lengths_: allow any new row to add new columns (back-filling
+  `null` for prior rows).
+* _No types_: every value is a string.
+* _No column names_: columns are named `"0"`, `"1"`, etc.
+* _Skip empty rows_: newline-only rows are ignored.
+* _Universal newlines_: `\r`, `\n` and any sequence of them start a new record.
+* _Permit any characters_: control characters and `\0` are not a problem. Also,
+  `"` is allowed in an unquoted value (except, of course, as the first
+  character).
+* _Recover on unclosed quote_: close a quote if we end on an unclosed quote.
+* _Recover on invalid value_: data after a close-quote is appended to a value.
+* _Warn on stdout_: stdout can produce lines of text matching these patterns:
+
+```
+skipped 102312 rows (after row limit of 1000000)
+skipped 1 columns (after column limit of 1000)
+truncated 123 values (value byte limit is 32768; see row 2 column 1)
+repaired 321 values (misplaced quotation marks; see row 3 column 5)
+repaired last value (missing quotation mark)
+```
+
+(Note `skipped 1 columns` is plural. The intent is for callers to parse using
+regular expressions, so the `s` is not optional. Also, messages formats won't
+change without a major-version bump.
+
+
 parquet-to-arrow-slice
 ----------------------
 

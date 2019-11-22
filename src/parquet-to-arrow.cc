@@ -4,7 +4,6 @@
 #include <string>
 #include <arrow/api.h>
 #include <arrow/io/api.h>
-#include <arrow/ipc/api.h>
 #include <parquet/api/reader.h>
 #include <parquet/arrow/reader.h>
 #include <parquet/exception.h>
@@ -61,16 +60,6 @@ static std::shared_ptr<arrow::Table> readParquet(const std::string& path) {
 }
 
 
-static void writeArrow(const arrow::Table& arrowTable, const std::string& path) {
-  std::shared_ptr<arrow::io::FileOutputStream> outputStream;
-  ASSERT_ARROW_OK(arrow::io::FileOutputStream::Open(path, &outputStream), "opening output stream");
-  std::shared_ptr<arrow::ipc::RecordBatchWriter> fileWriter;
-  ASSERT_ARROW_OK(arrow::ipc::RecordBatchFileWriter::Open(outputStream.get(), arrowTable.schema(), &fileWriter), "creating file writer");
-  ASSERT_ARROW_OK(fileWriter->WriteTable(arrowTable), "writing Arrow table");
-  ASSERT_ARROW_OK(fileWriter->Close(), "closing Arrow file");
-}
-
-
 int main(int argc, char** argv) {
   if (argc != 3) {
     std::cerr << "Usage: " << argv[0] << " PARQUET_FILENAME ARROW_FILENAME" << std::endl;
@@ -81,7 +70,7 @@ int main(int argc, char** argv) {
   const std::string arrowPath(argv[2]);
 
   std::shared_ptr<arrow::Table> arrowTable(readParquet(parquetPath));
-  writeArrow(*arrowTable, arrowPath);
+  writeArrowTable(*arrowTable, arrowPath);
 
   return 0;
 }

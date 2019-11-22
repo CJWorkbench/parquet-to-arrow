@@ -2,6 +2,8 @@
 #include <memory>
 #include <arrow/array/concatenate.h>
 #include <arrow/compute/api.h>
+#include <arrow/io/api.h>
+#include <arrow/ipc/api.h>
 
 #include "common.h"
 
@@ -83,4 +85,14 @@ arrow::Status decodeIfDictionary(std::shared_ptr<arrow::Array>* array)
     } else {
         return arrow::Status::OK();
     }
+}
+
+void writeArrowTable(const arrow::Table& arrowTable, const std::string& path)
+{
+  std::shared_ptr<arrow::io::FileOutputStream> outputStream;
+  ASSERT_ARROW_OK(arrow::io::FileOutputStream::Open(path, &outputStream), "opening output stream");
+  std::shared_ptr<arrow::ipc::RecordBatchWriter> fileWriter;
+  ASSERT_ARROW_OK(arrow::ipc::RecordBatchFileWriter::Open(outputStream.get(), arrowTable.schema(), &fileWriter), "creating file writer");
+  ASSERT_ARROW_OK(fileWriter->WriteTable(arrowTable), "writing Arrow table");
+  ASSERT_ARROW_OK(fileWriter->Close(), "closing Arrow file");
 }

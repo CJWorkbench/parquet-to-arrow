@@ -15,3 +15,4 @@ static inline void ASSERT_ARROW_OK(arrow::Status status, const char* message)
 
 arrow::Status decodeIfDictionary(std::shared_ptr<arrow::Array>* array);
 arrow::Status chunkedArrayToArray(const arrow::ChunkedArray& input, std::shared_ptr<arrow::Array>* output);
+void writeArrowTable(const arrow::Table& arrowTable, const std::string& path);

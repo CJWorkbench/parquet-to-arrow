@@ -25,7 +25,7 @@ include(FindPkgConfig)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake_modules")
 
 # This ensures that things like gnu++11 get passed correctly
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 
 # We require a C++11 compliant compiler
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,8 +33,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Look for installed packages the system
 pkg_search_module(ARROW REQUIRED arrow)
 pkg_search_module(PARQUET REQUIRED parquet)
-#find_library(THRIFT NAMES libthriftd.a)
-find_library(THRIFT NAMES libthrift.a)
+find_library(THRIFT NAMES libthrift.a libthriftd.a)
 find_library(BROTLIENC NAMES libbrotlienc-static.a)
 find_library(BROTLIDEC NAMES libbrotlidec-static.a)
 find_library(BROTLICOMMON NAMES libbrotlicommon-static.a)
@@ -47,7 +46,10 @@ pkg_search_module(ZSTD REQUIRED libzstd)
 pkg_search_module(ZLIB REQUIRED zlib)
 find_library(LZ4 NAMES liblz4.a)
 
-include_directories(SYSTEM ${ARROW_INCLUDE_DIR} ${PARQUET_INCLUDE_DIR})
+include_directories(SYSTEM ${ARROW_INCLUDE_DIR} ${PARQUET_INCLUDE_DIR} ${GFLAGS_INCLUDE_DIRS})
+
+add_executable(csv-to-arrow src/csv-to-arrow.cc src/common.cc)
+target_link_libraries(csv-to-arrow ${ARROW_STATIC_LDFLAGS} ${JEMALLOC_STATIC_LDFLAGS} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} -static -lpthread -lboost_filesystem -lboost_system)
 
 add_executable(parquet-diff src/parquet-diff.cc src/common.cc)
 target_link_libraries(parquet-diff ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} Snappy::snappy ${JEMALLOC_STATIC_LDFLAGS} ${BROTLIENC} ${BROTLIDEC} ${BROTLICOMMON} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} ${ZSTD_STATIC_LDFLAGS} ${LZ4} ${ZLIB_STATIC_LDFLAGS} -static -lpthread -lboost_regex -lboost_filesystem -lboost_system)

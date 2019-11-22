@@ -6,7 +6,6 @@ FROM debian:buster AS cpp-builddeps
 # * in Dockerfile, ensure libstdc++6-8-dbg is installed (this, we commit)
 # * in Dockerfile, set -DCMAKE_BUILD_TYPE=Debug when building Arrow
 # * in Dockerfile, set -DCMAKE_BUILD_TYPE=Debug when building parquet-to-arrow
-# * in CMakeLists.txt, find the library "libthriftd.a" instead of "libthrift.a"
 
 RUN true \
       && apt-get update \
@@ -60,7 +59,7 @@ WORKDIR /app
 FROM cpp-builddeps AS cpp-build
 
 RUN mkdir -p /app/src
-RUN touch /app/src/parquet-diff.cc /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc /app/src/common.cc
+RUN touch /app/src/csv-to-arrow.cc /app/src/parquet-diff.cc /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc /app/src/common.cc
 WORKDIR /app
 COPY CMakeLists.txt /app
 RUN cmake -DCMAKE_BUILD_TYPE=Release .
@@ -72,6 +71,7 @@ RUN make
 
 FROM python-dev AS test
 
+COPY --from=cpp-build /app/csv-to-arrow /usr/bin/csv-to-arrow
 COPY --from=cpp-build /app/parquet-diff /usr/bin/parquet-diff
 COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
 COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
@@ -82,6 +82,7 @@ RUN pytest -vv
 
 
 FROM scratch AS dist
+COPY --from=cpp-build /app/csv-to-arrow /usr/bin/csv-to-arrow
 COPY --from=cpp-build /app/parquet-diff /usr/bin/parquet-diff
 COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
 COPY --from=cpp-build /app/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
