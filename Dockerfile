@@ -33,7 +33,7 @@ COPY arrow-patches/ /arrow-patches/
 RUN true \
       && mkdir -p /src \
       && cd /src \
-      && curl -Oapache-arrow-0.15.0.tar.gz --location http://apache.mirror.gtcomm.net/arrow/arrow-0.15.0/apache-arrow-0.15.0.tar.gz \
+      && curl -Oapache-arrow-0.15.0.tar.gz --location http://archive.apache.org/dist/arrow/arrow-0.15.0/apache-arrow-0.15.0.tar.gz \
       && tar zxf apache-arrow-0.15.0.tar.gz \
       && cd apache-arrow-0.15.0 \
       && for patch in $(find /arrow-patches/*.diff | sort); do patch --verbose -p1 <$patch; done \
