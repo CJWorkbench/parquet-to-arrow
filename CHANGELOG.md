@@ -1,3 +1,8 @@
+v0.3.0 - 2019-11-22
+-------------------
+
+* `csv-to-arrow`: not Parquet-related, but so handy and fast....
+
 v0.2.0 - 2019-10-21
 -------------------
 
