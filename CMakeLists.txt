@@ -48,9 +48,6 @@ find_library(LZ4 NAMES liblz4.a)
 
 include_directories(SYSTEM ${ARROW_INCLUDE_DIR} ${PARQUET_INCLUDE_DIR} ${GFLAGS_INCLUDE_DIRS})
 
-add_executable(csv-to-arrow src/csv-to-arrow.cc src/common.cc)
-target_link_libraries(csv-to-arrow ${ARROW_STATIC_LDFLAGS} ${JEMALLOC_STATIC_LDFLAGS} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} -static -lpthread -lboost_filesystem -lboost_system)
-
 add_executable(parquet-diff src/parquet-diff.cc src/common.cc)
 target_link_libraries(parquet-diff ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} Snappy::snappy ${JEMALLOC_STATIC_LDFLAGS} ${BROTLIENC} ${BROTLIDEC} ${BROTLICOMMON} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} ${ZSTD_STATIC_LDFLAGS} ${LZ4} ${ZLIB_STATIC_LDFLAGS} -static -lpthread -lboost_regex -lboost_filesystem -lboost_system)
 

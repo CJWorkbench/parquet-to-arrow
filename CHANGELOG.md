@@ -1,3 +1,8 @@
+v1.0.0 - 2019-11-25
+-------------------
+
+* Move `csv-to-arrow` to a separate project. Focus on Parquet here.
+
 v0.3.0 - 2019-11-22
 -------------------
 
