@@ -30,6 +30,8 @@ set(CMAKE_CXX_STANDARD 17)
 # We require a C++11 compliant compiler
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+add_compile_options(-Wall -Werror)
+
 # Look for installed packages the system
 pkg_search_module(ARROW REQUIRED arrow)
 pkg_search_module(PARQUET REQUIRED parquet)

@@ -125,7 +125,7 @@ struct Printer : public arrow::ArrayVisitor {
     gmtime_r(&timeInput, &time);
 
     // We always print date
-    fprintf(this->fp, "%-04d-%02d-%02d", time.tm_year + 1900, time.tm_mon + 1, time.tm_mday);
+    fprintf(this->fp, "%04d-%02d-%02d", time.tm_year + 1900, time.tm_mon + 1, time.tm_mday);
 
     // "Auto-format" time: only print the resolution it uses.
     //
@@ -465,8 +465,8 @@ streamParquet(const std::string& path, Printer& printer, Range columnRange, Rang
   rowRange = rowRange.clip(nRows);
 
   std::vector<std::unique_ptr<ColumnIterator>> columnIterators(columnRange.size());
-  for (int i = 0; i < columnIterators.size(); i++) {
-    int columnIndex = columnRange.start + i;
+  for (size_t i = 0; i < columnIterators.size(); i++) {
+    size_t columnIndex = columnRange.start + i;
     std::unique_ptr<parquet::arrow::ColumnReader> columnReader;
     ASSERT_ARROW_OK(arrowReader->GetColumn(columnIndex, &columnReader), "getting column");
     columnIterators[i].reset(new ColumnIterator(i, schema->field(columnIndex)->name(), nRows, std::move(columnReader)));

@@ -35,7 +35,7 @@ static std::shared_ptr<arrow::Table> readParquet(const std::string& path, const 
 
   std::vector<std::shared_ptr<arrow::Array>> columnArrays;
   std::vector<std::shared_ptr<arrow::Field>> fields;
-  for (int i = clippedColumnRange.start; i < clippedColumnRange.stop; i++) {
+  for (uint64_t i = clippedColumnRange.start; i < clippedColumnRange.stop; i++) {
     std::unique_ptr<parquet::arrow::ColumnReader> columnReader;
     ASSERT_ARROW_OK(parquetReader->GetColumn(i, &columnReader), "opening column");
     std::shared_ptr<arrow::ChunkedArray> columnChunks;
