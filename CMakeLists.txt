@@ -54,9 +54,9 @@ target_link_libraries(parquet-diff ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFL
 add_executable(parquet-to-arrow src/parquet-to-arrow.cc src/common.cc)
 target_link_libraries(parquet-to-arrow ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} Snappy::snappy ${JEMALLOC_STATIC_LDFLAGS} ${BROTLIENC} ${BROTLIDEC} ${BROTLICOMMON} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} ${ZSTD_STATIC_LDFLAGS} ${LZ4} ${ZLIB_STATIC_LDFLAGS} -static -lpthread -lboost_regex -lboost_filesystem -lboost_system)
 
-add_executable(parquet-to-arrow-slice src/parquet-to-arrow-slice.cc src/common.cc)
+add_executable(parquet-to-arrow-slice src/parquet-to-arrow-slice.cc src/common.cc src/range.cc)
 target_link_libraries(parquet-to-arrow-slice ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} Snappy::snappy ${JEMALLOC_STATIC_LDFLAGS} ${BROTLIENC} ${BROTLIDEC} ${BROTLICOMMON} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} ${ZSTD_STATIC_LDFLAGS} ${LZ4} ${ZLIB_STATIC_LDFLAGS} -static -lpthread -lboost_regex -lboost_filesystem -lboost_system)
 
-add_executable(parquet-to-text-stream src/parquet-to-text-stream.cc src/common.cc)
+add_executable(parquet-to-text-stream src/parquet-to-text-stream.cc src/common.cc src/range.cc)
 target_include_directories(parquet-to-text-stream PRIVATE ${double-conversion_INCLUDE_DIR})
 target_link_libraries(parquet-to-text-stream ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} Snappy::snappy ${JEMALLOC_STATIC_LDFLAGS} ${BROTLIENC} ${BROTLIDEC} ${BROTLICOMMON} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} ${ZSTD_STATIC_LDFLAGS} ${LZ4} ${ZLIB_STATIC_LDFLAGS} -static -lpthread -lboost_regex -lboost_filesystem -lboost_system)

@@ -70,8 +70,8 @@ parquet-to-text-stream
 
 *Purpose*: stream a Parquet file for public consumption in common format.
 
-*Usage*: `parquet-to-text-stream input.parquet csv > out.csv`
-(where the format is one of `csv` or ... uh ... that's it for now!)
+*Usage*: `parquet-to-text-stream [OPTIONS] input.parquet <FORMAT> > out.csv`
+(where `<FORMAT>` is one of `csv` or `json`)
 
 *Features*:
 
@@ -80,13 +80,15 @@ parquet-to-text-stream
 * _Quick time to first byte_: streaming clients see results quickly.
 * _CSV Output_ (choose `csv` format): null/inf/-inf/NaN are all output as empty
   string; all but the most wonky floats are formatted as decimal; timestamps
-  are ISO8601-formatted with the fewest characters possible (e.g., "2019-09-24"
-  instead of "2019-09-24T00:00:00.000000000Z")
+  are ISO8601-formatted to the fewest characters possible, remaining lossless
+  (e.g., "2019-09-24" instead of "2019-09-24T00:00:00.000000000Z")
 * _JSON Output_ (choose `json` format): null/inf/-inf/NaN are all output as
   `null`; floats are formatted according to
   [ECMAScript Standard](https://www.ecma-international.org/ecma-262/6.0/#sec-tostring-applied-to-the-number-type);
   timestamps are ISO8601-formatted Strings with the fewest characters possible
   (e.g., "2019-09-24" instead of "2019-09-24T00:00:00.000000000Z")
+* `--row-range=100-200`: omit rows 0-99 and 200+ (gives a speed boost)
+* `--column-range=10-20`: omit columns 0-9 and 20+ (gives a speed boost)
 
 parquet-diff
 ------------

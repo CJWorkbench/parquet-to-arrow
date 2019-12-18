@@ -1,3 +1,8 @@
+v1.1.0 - 2019-12-18
+-------------------
+
+* `parquet-to-text-stream`: add `--column-range` and `--row-range` flags
+
 v1.0.0 - 2019-11-25
 -------------------
 

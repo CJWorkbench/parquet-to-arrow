@@ -12,57 +12,11 @@
 #include <parquet/exception.h>
 
 #include "common.h"
+#include "range.h"
 
 
 static const int SKIP_MAX_BATCH_SIZE = 10000; // when seeking, how quickly do we seek? Higher costs more RAM.
 
-
-/**
- * A pair of characters on the unsigned-integer number line.
- *
- * * Start comes before stop.
- * * Start is inclusive, and the first valid value is 0.
- * * Stop is exclusive.
- * * If start == stop, the range is empty.
- */
-struct Range {
-  int start;
-  int stop;
-
-  Range(int aStart, int aStop) : start(aStart), stop(aStop) {}
-
-  /**
-   * Parse a Range from a C string.
-   *
-   * Throw std::invalid_argument or std::out_of_range if input is not valid.
-   */
-  static Range parse(const std::string& s) {
-    std::size_t pos(0);
-    const int start = static_cast<int>(std::stoul(s, &pos)); // throw invalid_argument/out_of_range
-    if (pos >= s.length() || s[pos] != '-') {
-      throw std::invalid_argument("Range requires '-' character (as in, '0-12')");
-    }
-    const int stop = static_cast<int>(std::stoul(s.substr(pos + 1))); // throw invalid_argument/out_of_range
-    if (start > stop) {
-      throw std::invalid_argument("Range's start must come before its stop (as in, '0-12')");
-    }
-    return Range(start, stop);
-  }
-
-  int size() const {
-    return this->stop - this->start;
-  }
-
-  std::vector<int> indices() const {
-    std::vector<int> ret(this->stop - this->start);
-    std::iota(ret.begin(), ret.end(), this->start);
-    return ret;
-  }
-
-  Range clip(int max) const {
-    return Range(std::min(this->start, max), std::min(this->stop, max));
-  }
-};
 
 static std::shared_ptr<arrow::Table> readParquet(const std::string& path, const Range& columnRange, const Range& rowRange) {
   std::shared_ptr<arrow::io::MemoryMappedFile> parquetFile;
@@ -126,8 +80,18 @@ int main(int argc, char** argv) {
   }
 
   const std::string parquetPath(argv[1]);
-  const Range columnRange(Range::parse(std::string(argv[2])));
-  const Range rowRange(Range::parse(std::string(argv[3])));
+  const std::string columnRangeString(argv[2]);
+  const std::string rowRangeString(argv[3]);
+  auto [ columnRange, columnRangeErr ] = parse_range(&*columnRangeString.cbegin(), &*columnRangeString.cend());
+  if (columnRangeErr != std::errc()) {
+    std::cerr << "column range must look like '123-234': " << std::make_error_code(columnRangeErr) << std::endl;
+    return 1;
+  }
+  auto [ rowRange, rowRangeErr ] = parse_range(&*rowRangeString.cbegin(), &*rowRangeString.cend());
+  if (rowRangeErr != std::errc()) {
+    std::cerr << "row range must look like '123-234': " << std::make_error_code(rowRangeErr) << std::endl;
+    return 1;
+  }
   const std::string arrowPath(argv[4]);
 
   std::shared_ptr<arrow::Table> arrowTable(readParquet(parquetPath, columnRange, rowRange));

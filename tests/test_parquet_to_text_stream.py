@@ -18,13 +18,13 @@ def canonical_json(data) -> str:
     )
 
 
-def do_convert(parquet_path: Path, format: str) -> str:
+def do_convert(parquet_path: Path, format: str, **kwargs) -> str:
+    cmd = ["/usr/bin/parquet-to-text-stream", str(parquet_path), format]
+    for k, v in kwargs.items():
+        cmd.append(k)
+        cmd.append(v)
     try:
-        completed = subprocess.run(
-            ["/usr/bin/parquet-to-text-stream", str(parquet_path), format],
-            capture_output=True,
-            check=True,
-        )
+        completed = subprocess.run(cmd, capture_output=True, check=True)
     except subprocess.CalledProcessError as err:
         # Rewrite error so it's easy to read in test-result stack trace
         raise RuntimeError(
@@ -37,19 +37,21 @@ def do_convert(parquet_path: Path, format: str) -> str:
     return completed.stdout
 
 
-def _test_convert_via_arrow(table: pyarrow.Table, expect_csv, expect_json) -> None:
+def _test_convert_via_arrow(
+    table: pyarrow.Table, expect_csv, expect_json, **kwargs
+) -> None:
     """
     Convert `table` from Arrow to parquet; then stream the Parquet file.
 
     This is an intuitive interface for testing happy-path Parquet files.
     """
     with parquet_file(table) as parquet_path:
-        csv = do_convert(parquet_path, "csv")
+        csv = do_convert(parquet_path, "csv", **kwargs)
         if isinstance(expect_csv, str):
             expect_csv = expect_csv.encode("utf-8")
         assert csv == expect_csv
 
-        json_text = do_convert(parquet_path, "json")
+        json_text = do_convert(parquet_path, "json", **kwargs)
         if isinstance(expect_json, list):
             expect_json = canonical_json(expect_json)
         if isinstance(expect_json, str):
@@ -265,6 +267,66 @@ def test_convert_zero_rows():
         ),
         "A,B",
         "[]",
+    )
+
+
+def test_column_range():
+    _test_convert_via_arrow(
+        pyarrow.table(
+            {
+                "A": ["a0", "a1", "a2", "a3", "a4"],
+                "B": ["b0", "b1", "b2", "b3", "b4"],
+                "C": ["c0", "c1", "c2", "c3", "c4"],
+                "D": ["d0", "d1", "d2", "d3", "d4"],
+                "E": ["e0", "e1", "e2", "e3", "e4"],
+            }
+        ),
+        "B,C\nb0,c0\nb1,c1\nb2,c2\nb3,c3\nb4,c4",
+        '[{"B":"b0","C":"c0"},{"B":"b1","C":"c1"},{"B":"b2","C":"c2"},{"B":"b3","C":"c3"},{"B":"b4","C":"c4"}]',
+        **{"--column-range": "1-3"},
+    )
+
+
+def test_row_range():
+    _test_convert_via_arrow(
+        pyarrow.table(
+            {
+                "A": ["a0", "a1", "a2", "a3", "a4"],
+                "B": ["b0", "b1", "b2", "b3", "b4"],
+                "C": ["c0", "c1", "c2", "c3", "c4"],
+                "D": ["d0", "d1", "d2", "d3", "d4"],
+                "E": ["e0", "e1", "e2", "e3", "e4"],
+            }
+        ),
+        "A,B,C,D,E\na1,b1,c1,d1,e1\na2,b2,c2,d2,e2",
+        '[{"A":"a1","B":"b1","C":"c1","D":"d1","E":"e1"},{"A":"a2","B":"b2","C":"c2","D":"d2","E":"e2"}]',
+        **{"--row-range": "1-3"},
+    )
+
+
+def test_column_and_row_range():
+    _test_convert_via_arrow(
+        pyarrow.table(
+            {
+                "A": ["a0", "a1", "a2", "a3", "a4"],
+                "B": ["b0", "b1", "b2", "b3", "b4"],
+                "C": ["c0", "c1", "c2", "c3", "c4"],
+                "D": ["d0", "d1", "d2", "d3", "d4"],
+                "E": ["e0", "e1", "e2", "e3", "e4"],
+            }
+        ),
+        "D,E\nd1,e1\nd2,e2",
+        '[{"D":"d1","E":"e1"},{"D":"d2","E":"e2"}]',
+        **{"--column-range": "3-5", "--row-range": "1-3"},
+    )
+
+
+def test_column_and_row_range_clip_max():
+    _test_convert_via_arrow(
+        pyarrow.table({"A": ["a0", "a1"], "B": ["b0", "b1"]}),
+        "B\nb1",
+        '[{"B":"b1"}]',
+        **{"--column-range": "1-9", "--row-range": "1-9"},
     )
 
 

@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <vector>
 #include <cmath>
 #include <cinttypes>
@@ -12,11 +14,32 @@
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
 #include <double-conversion/double-conversion.h> // already a dep of arrow; and printf won't do
+#include <gflags/gflags.h>
 #include <parquet/api/reader.h>
 #include <parquet/arrow/reader.h>
 #include <parquet/exception.h>
 
 #include "common.h"
+#include "range.h"
+
+static bool
+validate_range(const char* flagname, const std::string& value)
+{
+  if (value == "") return true;
+
+  auto [_, ec] = parse_range(&*value.cbegin(), &*value.cend());
+  if (ec != std::errc()) {
+    std::cerr << flagname << " does not look like '123-234': " << std::make_error_code(ec) << std::endl;
+    return false;
+  }
+
+  return true;
+}
+
+DEFINE_string(row_range, "", "[start, end) range of rows to include");
+DEFINE_validator(row_range, &validate_range);
+DEFINE_string(column_range, "", "[start, end) range of columns to include");
+DEFINE_validator(column_range, &validate_range);
 
 
 // Batch size determines RAM usage and I/O.
@@ -24,10 +47,14 @@
 // Lower value might mean "more seeking" (though we have not tested that).
 // Higher value means "more RAM".
 //
-// parquet-to-web is designed for streaming data over the Internet. So
+// parquet-to-text-stream is designed for streaming data over the Internet. So
 // [adamhooper, 2019-09-23] my intuition is that the client side is slow;
 // therefore, I lean towards low RAM, high seeking.
 static const int BATCH_SIZE = 100;
+
+
+// when seeking, how quickly do we seek? Higher costs more RAM.
+static const int64_t SKIP_MAX_BATCH_SIZE = 10000;
 
 
 // [adamhooper, 2019-09-25] a shoddy use of inheritance here
@@ -372,6 +399,16 @@ struct ColumnIterator {
   {
   }
 
+  void skipRows(int64_t toSkip) {
+    std::shared_ptr<arrow::ChunkedArray> columnChunks;
+    while (toSkip > 0) {
+      const int64_t batchSize = std::min(toSkip, SKIP_MAX_BATCH_SIZE);
+      ASSERT_ARROW_OK(this->columnReader->NextBatch(batchSize, &columnChunks), "skipping column data");
+      columnChunks = nullptr; // free RAM
+      toSkip -= batchSize;
+    }
+  }
+
   bool advanceToNextValueIfAvailable() {
     this->batchIndex++;
     this->rowIndex++;
@@ -411,7 +448,8 @@ struct ColumnIterator {
 };
 
 
-static void streamParquet(const std::string& path, const std::string& format, FILE* fp) {
+static void
+streamParquet(const std::string& path, Printer& printer, Range columnRange, Range rowRange) {
   std::shared_ptr<arrow::io::MemoryMappedFile> parquetFile;
   ASSERT_ARROW_OK(arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ, &parquetFile), "opening Parquet file");
   std::unique_ptr<parquet::arrow::FileReader> arrowReader;
@@ -423,59 +461,75 @@ static void streamParquet(const std::string& path, const std::string& format, FI
 
   int nRows = arrowReader->parquet_reader()->metadata()->num_rows();
 
-  std::vector<std::unique_ptr<ColumnIterator>> columnIterators(schema->num_fields());
-  for (int i = 0; i < columnIterators.size(); i++) {
-    std::unique_ptr<parquet::arrow::ColumnReader> columnReader;
-    ASSERT_ARROW_OK(arrowReader->GetColumn(i, &columnReader), "getting column");
-    columnIterators[i].reset(new ColumnIterator(i, schema->field(i)->name(), nRows, std::move(columnReader)));
-  }
+  columnRange = columnRange.clip(schema->num_fields());
+  rowRange = rowRange.clip(nRows);
 
-  std::unique_ptr<Printer> printer;
-  if (format == "json") {
-    printer.reset(new JsonPrinter(fp));
-  } else {
-    printer.reset(new CsvPrinter(fp));
+  std::vector<std::unique_ptr<ColumnIterator>> columnIterators(columnRange.size());
+  for (int i = 0; i < columnIterators.size(); i++) {
+    int columnIndex = columnRange.start + i;
+    std::unique_ptr<parquet::arrow::ColumnReader> columnReader;
+    ASSERT_ARROW_OK(arrowReader->GetColumn(columnIndex, &columnReader), "getting column");
+    columnIterators[i].reset(new ColumnIterator(i, schema->field(columnIndex)->name(), nRows, std::move(columnReader)));
+    columnIterators[i]->skipRows(static_cast<int64_t>(rowRange.start));
   }
 
   // Write headers
-  printer->writeFileHeader();
+  printer.writeFileHeader();
   for (const auto& columnIterator : columnIterators) {
-    printer->prepare(columnIterator->columnIndex, &columnIterator->name, columnIterator->batchIndex);
-    printer->writeHeaderField();
+    printer.prepare(columnIterator->columnIndex, &columnIterator->name, columnIterator->batchIndex);
+    printer.writeHeaderField();
   }
   if (columnIterators.size() > 0) {
-    bool isFirst = true;
-    while (true) {
+    for (auto row = rowRange.start; row < rowRange.stop; row++) {
       for (auto& columnIterator : columnIterators) {
         if (!columnIterator->advanceToNextValueIfAvailable()) {
           goto footer;
         }
       }
-      printer->writeRecordStart(isFirst);
+      printer.writeRecordStart(row == rowRange.start);
       for (auto& columnIterator : columnIterators) {
-        columnIterator->printCurrentValue(*printer);
+        columnIterator->printCurrentValue(printer);
       }
-      printer->writeRecordStop();
-      isFirst = false;
+      printer.writeRecordStop();
     }
   }
 footer:
-  printer->writeFileFooter();
+  printer.writeFileFooter();
 }
 
 
 int main(int argc, char** argv) {
+  std::string usage = std::string("Usage: ") + argv[0] + " <PARQUET_FILENAME> <FORMAT>";
+  gflags::SetUsageMessage(usage);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   if (argc != 3) {
-    std::cerr << "Usage: " << argv[0] << " PARQUET_FILENAME FORMAT" << std::endl;
-    std::cerr << std::endl;
-    std::cerr << "For instance: " << argv[0] << " table.parquet csv" << std::endl;
+    gflags::ShowUsageWithFlags(argv[0]);
     return 1;
   }
 
   const std::string parquetPath(argv[1]);
-  const std::string format(argv[2]);
+  const std::string formatString(argv[2]);
 
-  streamParquet(parquetPath, format, stdout);
+  Range columnRange;
+  if (FLAGS_column_range != "") {
+    columnRange = parse_range(&*FLAGS_column_range.cbegin(), &*FLAGS_column_range.cend()).range;
+  }
+  Range rowRange;
+  if (FLAGS_row_range != "") {
+    rowRange = parse_range(&*FLAGS_row_range.cbegin(), &*FLAGS_row_range.cend()).range;
+  }
+
+  if (formatString == "csv") {
+    CsvPrinter printer(stdout);
+    streamParquet(parquetPath, printer, columnRange, rowRange);
+  } else if (formatString == "json") {
+    JsonPrinter printer(stdout);
+    streamParquet(parquetPath, printer, columnRange, rowRange);
+  } else {
+    std::cerr << "<FORMAT> must be either 'csv' or 'json'" << std::endl;
+    gflags::ShowUsageWithFlags(argv[0]);
+    return 1;
+  }
 
   return 0;
 }

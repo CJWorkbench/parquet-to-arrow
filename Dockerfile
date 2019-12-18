@@ -59,14 +59,14 @@ WORKDIR /app
 FROM cpp-builddeps AS cpp-build
 
 RUN mkdir -p /app/src
-RUN touch /app/src/parquet-diff.cc /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc /app/src/common.cc
+RUN touch /app/src/parquet-diff.cc /app/src/parquet-to-arrow-slice.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc /app/src/common.cc /app/src/range.cc
 WORKDIR /app
 COPY CMakeLists.txt /app
 RUN cmake -DCMAKE_BUILD_TYPE=Release .
 #RUN cmake .
 
 COPY src/ /app/src/
-RUN make
+RUN make -j4
 
 
 FROM python-dev AS test
