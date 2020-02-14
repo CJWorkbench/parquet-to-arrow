@@ -15,7 +15,7 @@ FROM workbenchdata/parquet-to-arrow:VERSION AS parquet-to-arrow
 FROM debian:buster AS my-normal-build
 # ... normal Dockerfile stuff...
 # ... normal Dockerfile stuff...
-COPY --from=parquet-to-arrow /usr/bin/parquet-to-arrow-slice /usr/bin/parquet-to-arrow-slice
+COPY --from=parquet-to-arrow /usr/bin/parquet-to-arrow /usr/bin/parquet-to-arrow
 # ... normal Dockerfile stuff...
 ```
 
@@ -41,28 +41,6 @@ You may choose to invoke `parquet-to-arrow` even from Python, where `pyarrow`
 has the same features. That way, if the kernel out-of-memory killer kills
 `parquet-to-arrow`, your Python code can handle the error. (TODO limit RAM by
 converting and writing one column at a time.)
-
-parquet-to-arrow-slice
-----------------------
-
-*Purpose*: convert a small fraction of a Parquet file to Arrow format.
-
-*Usage*: `parquet-to-arrow-slice input.parquet 0-10 0-200 output.arrow`
-(where `0-10` is a selection of columns and `0-200` is a selection of
-rows).
-
-*Features*:
-
-* _Manageable RAM usage_: in large datasets, never hold an entire column
-  in memory.
-* _Auto-convert UTF-8 dictionaries_ to string columns: this tool is tuned to
-  small numbers of rows; dictionaries are unneeded hassle.
-
-*TODO*:
-
-* When Parquet 0.15 comes out, use its enhanced dictionary support to seek
-  without converting dictionary to string. That should speed slicing a file
-  with an oversized dictionary and hundreds of thousands of rows.
 
 parquet-to-text-stream
 ----------------------

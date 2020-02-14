@@ -130,7 +130,10 @@ def test_invalid_parquet():
 
     assert child.returncode == 1
     assert child.stdout == b""
-    assert child.stderr == b"Invalid parquet file. Corrupt footer.\n"
+    assert child.stderr == (
+        b"Invalid: Parquet magic bytes not found in footer. Either the file is corrupted"
+        b" or this is not a parquet file.\n"
+    )
 
 
 @pytest.mark.filterwarnings("ignore:RangeIndex._:DeprecationWarning")

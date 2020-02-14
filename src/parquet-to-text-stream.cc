@@ -98,7 +98,7 @@ struct Printer : public arrow::ArrayVisitor {
     gmtime_r(&timeInput, &time);
 
     // We always print date
-    fprintf(this->fp, "%-04d-%02d-%02d", time.tm_year + 1900, time.tm_mon + 1, time.tm_mday);
+    fprintf(this->fp, "%04d-%02d-%02d", time.tm_year + 1900, time.tm_mon + 1, time.tm_mday);
 
     // "Auto-format" time: only print the resolution it uses.
     //
@@ -412,8 +412,10 @@ struct ColumnIterator {
 
 
 static void streamParquet(const std::string& path, const std::string& format, FILE* fp) {
-  std::shared_ptr<arrow::io::MemoryMappedFile> parquetFile;
-  ASSERT_ARROW_OK(arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ, &parquetFile), "opening Parquet file");
+  std::shared_ptr<arrow::io::MemoryMappedFile> parquetFile = ASSERT_ARROW_OK(
+    arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ),
+    "opening Parquet file"
+  );
   std::unique_ptr<parquet::arrow::FileReader> arrowReader;
   ASSERT_ARROW_OK(parquet::arrow::OpenFile(parquetFile, arrow::default_memory_pool(), &arrowReader), "creating Parquet reader");
   arrowReader->set_use_threads(false);
@@ -424,7 +426,7 @@ static void streamParquet(const std::string& path, const std::string& format, FI
   int nRows = arrowReader->parquet_reader()->metadata()->num_rows();
 
   std::vector<std::unique_ptr<ColumnIterator>> columnIterators(schema->num_fields());
-  for (int i = 0; i < columnIterators.size(); i++) {
+  for (unsigned int i = 0; i < columnIterators.size(); i++) {
     std::unique_ptr<parquet::arrow::ColumnReader> columnReader;
     ASSERT_ARROW_OK(arrowReader->GetColumn(i, &columnReader), "getting column");
     columnIterators[i].reset(new ColumnIterator(i, schema->field(i)->name(), nRows, std::move(columnReader)));

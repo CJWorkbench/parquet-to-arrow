@@ -62,8 +62,10 @@ static std::shared_ptr<arrow::Table> readParquet(const std::string& path) {
 
 
 static void writeArrow(const arrow::Table& arrowTable, const std::string& path) {
-  std::shared_ptr<arrow::io::FileOutputStream> outputStream;
-  ASSERT_ARROW_OK(arrow::io::FileOutputStream::Open(path, &outputStream), "opening output stream");
+  std::shared_ptr<arrow::io::FileOutputStream> outputStream(ASSERT_ARROW_OK(
+    arrow::io::FileOutputStream::Open(path),
+    "opening output stream"
+  ));
   std::shared_ptr<arrow::ipc::RecordBatchWriter> fileWriter;
   ASSERT_ARROW_OK(arrow::ipc::RecordBatchFileWriter::Open(outputStream.get(), arrowTable.schema(), &fileWriter), "creating file writer");
   ASSERT_ARROW_OK(fileWriter->WriteTable(arrowTable), "writing Arrow table");
