@@ -6,7 +6,6 @@ FROM debian:buster AS cpp-builddeps
 # * in Dockerfile, ensure libstdc++6-8-dbg is installed (this, we commit)
 # * in Dockerfile, set -DCMAKE_BUILD_TYPE=Debug when building Arrow
 # * in Dockerfile, set -DCMAKE_BUILD_TYPE=Debug when building parquet-to-arrow
-# * in CMakeLists.txt, find the library "libthriftd.a" instead of "libthrift.a"
 
 RUN true \
       && apt-get update \
@@ -24,6 +23,7 @@ RUN true \
           libboost-regex-dev \
           libboost-system-dev \
           libdouble-conversion-dev \
+          libsnappy-dev \
           libstdc++6-8-dbg \
           pkg-config \
           python \
@@ -33,17 +33,21 @@ RUN true \
 RUN true \
       && mkdir -p /src \
       && cd /src \
-      && curl -Oapache-arrow-0.16.0.tar.gz --location http://apache.mirror.gtcomm.net/arrow/arrow-0.16.0/apache-arrow-0.16.0.tar.gz \
-      && tar zxf apache-arrow-0.16.0.tar.gz \
-      && cd apache-arrow-0.16.0/cpp \
-      && cmake -DARROW_PARQUET=ON -DARROW_COMPUTE=ON -DARROW_WITH_SNAPPY=ON -DARROW_OPTIONAL_INSTALL=ON -DARROW_BUILD_STATIC=ON -DARROW_BUILD_SHARED=OFF -DCMAKE_BUILD_TYPE=Release . \
+      && curl http://mirror.cc.columbia.edu/pub/software/apache/arrow/arrow-0.16.0/apache-arrow-0.16.0.tar.gz | tar zx
+
+COPY arrow-patches/ /arrow-patches/
+
+RUN true \
+      && cd /src/apache-arrow-0.16.0 \
+      && for patch in $(find /arrow-patches/*.diff | sort); do patch --verbose -p1 <$patch; done \
+      && cd cpp \
+      && cmake -DARROW_PARQUET=ON -DARROW_COMPUTE=ON -DARROW_WITH_SNAPPY=ON -DARROW_OPTIONAL_INSTALL=ON -DARROW_BUILD_STATIC=ON -DARROW_BUILD_SHARED=OFF -DCMAKE_BUILD_TYPE=Debug . \
       && make -j4 arrow \
       && make -j4 parquet \
       && make install
 
 ENV PKG_CONFIG_PATH "/src/apache-arrow-0.16.0/cpp/jemalloc_ep-prefix/src/jemalloc_ep/dist/lib/pkgconfig"
 ENV CMAKE_PREFIX_PATH "/src/apache-arrow-0.16.0/cpp/thrift_ep/src/thrift_ep-install"
-ENV Snappy_DIR "/src/apache-arrow-0.16.0/cpp/snappy_ep/src/snappy_ep-install/lib/cmake/Snappy"
 
 
 FROM python:3.8.1-buster AS python-dev
@@ -60,7 +64,7 @@ RUN mkdir -p /app/src
 RUN touch /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc /app/src/common.cc
 WORKDIR /app
 COPY CMakeLists.txt /app
-RUN cmake -DCMAKE_BUILD_TYPE=Release .
+RUN cmake -DCMAKE_BUILD_TYPE=Debug .
 #RUN cmake .
 
 COPY src/ /app/src/
