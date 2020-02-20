@@ -450,8 +450,10 @@ struct ColumnIterator {
 
 static void
 streamParquet(const std::string& path, Printer& printer, Range columnRange, Range rowRange) {
-  std::shared_ptr<arrow::io::MemoryMappedFile> parquetFile;
-  ASSERT_ARROW_OK(arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ, &parquetFile), "opening Parquet file");
+  std::shared_ptr<arrow::io::MemoryMappedFile> parquetFile(ASSERT_ARROW_OK(
+    arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ),
+    "opening Parquet file"
+  ));
   std::unique_ptr<parquet::arrow::FileReader> arrowReader;
   ASSERT_ARROW_OK(parquet::arrow::OpenFile(parquetFile, arrow::default_memory_pool(), &arrowReader), "creating Parquet reader");
   arrowReader->set_use_threads(false);

@@ -33,32 +33,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(-Wall -Werror)
 
 # Look for installed packages the system
+find_library(THRIFT NAMES libthrift.a libthriftd.a)
+find_package(GFLAGS REQUIRED)
 pkg_search_module(ARROW REQUIRED arrow)
 pkg_search_module(PARQUET REQUIRED parquet)
-find_library(THRIFT NAMES libthrift.a libthriftd.a)
-find_library(BROTLIENC NAMES libbrotlienc-static.a)
-find_library(BROTLIDEC NAMES libbrotlidec-static.a)
-find_library(BROTLICOMMON NAMES libbrotlicommon-static.a)
-find_package(Snappy REQUIRED)
-find_package(glog REQUIRED)
-find_package(double-conversion REQUIRED)
 pkg_search_module(JEMALLOC REQUIRED jemalloc)
-pkg_search_module(GFLAGS REQUIRED gflags)
-pkg_search_module(ZSTD REQUIRED libzstd)
-pkg_search_module(ZLIB REQUIRED zlib)
-find_library(LZ4 NAMES liblz4.a)
 
 include_directories(SYSTEM ${ARROW_INCLUDE_DIR} ${PARQUET_INCLUDE_DIR} ${GFLAGS_INCLUDE_DIRS})
 
 add_executable(parquet-diff src/parquet-diff.cc src/common.cc)
-target_link_libraries(parquet-diff ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} Snappy::snappy ${JEMALLOC_STATIC_LDFLAGS} ${BROTLIENC} ${BROTLIDEC} ${BROTLICOMMON} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} ${ZSTD_STATIC_LDFLAGS} ${LZ4} ${ZLIB_STATIC_LDFLAGS} -static -lpthread -lboost_regex -lboost_filesystem -lboost_system)
+target_link_libraries(parquet-diff ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} ${JEMALLOC_STATIC_LDFLAGS} ${GFLAGS_STATIC_LDFLAGS} -static -lpthread -lsnappy -ldouble-conversion -lboost_regex -lboost_filesystem -lboost_system)
 
 add_executable(parquet-to-arrow src/parquet-to-arrow.cc src/common.cc)
-target_link_libraries(parquet-to-arrow ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} Snappy::snappy ${JEMALLOC_STATIC_LDFLAGS} ${BROTLIENC} ${BROTLIDEC} ${BROTLICOMMON} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} ${ZSTD_STATIC_LDFLAGS} ${LZ4} ${ZLIB_STATIC_LDFLAGS} -static -lpthread -lboost_regex -lboost_filesystem -lboost_system)
-
-add_executable(parquet-to-arrow-slice src/parquet-to-arrow-slice.cc src/common.cc src/range.cc)
-target_link_libraries(parquet-to-arrow-slice ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} Snappy::snappy ${JEMALLOC_STATIC_LDFLAGS} ${BROTLIENC} ${BROTLIDEC} ${BROTLICOMMON} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} ${ZSTD_STATIC_LDFLAGS} ${LZ4} ${ZLIB_STATIC_LDFLAGS} -static -lpthread -lboost_regex -lboost_filesystem -lboost_system)
+target_link_libraries(parquet-to-arrow ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} ${JEMALLOC_STATIC_LDFLAGS} -static -lpthread -lsnappy -lboost_regex -lboost_filesystem -lboost_system)
 
 add_executable(parquet-to-text-stream src/parquet-to-text-stream.cc src/common.cc src/range.cc)
-target_include_directories(parquet-to-text-stream PRIVATE ${double-conversion_INCLUDE_DIR})
-target_link_libraries(parquet-to-text-stream ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} Snappy::snappy ${JEMALLOC_STATIC_LDFLAGS} ${BROTLIENC} ${BROTLIDEC} ${BROTLICOMMON} glog::glog double-conversion::double-conversion ${GFLAGS_STATIC_LDFLAGS} ${ZSTD_STATIC_LDFLAGS} ${LZ4} ${ZLIB_STATIC_LDFLAGS} -static -lpthread -lboost_regex -lboost_filesystem -lboost_system)
+target_link_libraries(parquet-to-text-stream ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} ${JEMALLOC_STATIC_LDFLAGS} ${GFLAGS_STATIC_LDFLAGS} -static -lgflags -lpthread -lsnappy -lboost_regex -lboost_filesystem -lboost_system -ldouble-conversion)
