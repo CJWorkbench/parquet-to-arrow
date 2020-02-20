@@ -1,3 +1,10 @@
+v2.0.0 - 2020-02-19
+-------------------
+
+* `parquet-to-arrow-slice`: delete this binary, because nobody is using it.
+  (This is why there's a major-version bump.)
+* Upgrade to Arrow 0.16.0.
+
 v1.1.0 - 2019-12-18
 -------------------
 
