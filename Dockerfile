@@ -53,7 +53,7 @@ ENV CMAKE_PREFIX_PATH "/src/apache-arrow-0.16.0/cpp/thrift_ep/src/thrift_ep-inst
 
 FROM python:3.8.1-buster AS python-dev
 
-RUN pip install pyarrow==0.16.0 pytest pandas==0.25.1 fastparquet==0.3.2
+RUN pip install pyarrow==0.16.0 pytest pandas==1.0.1 fastparquet==0.3.3
 
 RUN mkdir /app
 WORKDIR /app

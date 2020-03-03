@@ -1,3 +1,8 @@
+v2.0.1 - 2020-03-03
+-------------------
+
+* `parquet-to-text-stream`: fix ISO8601-formatting of dates before 1970.
+
 v2.0.0 - 2020-02-19
 -------------------
 

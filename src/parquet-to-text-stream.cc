@@ -104,16 +104,28 @@ struct Printer : public arrow::ArrayVisitor {
         epochSeconds = value / 1000;
         subsecondFraction = value % 1000;
         nFractionDigits = 3;
+        if (value < 0  && subsecondFraction != 0) {
+          epochSeconds -= 1;
+          subsecondFraction = (subsecondFraction + 1000) % 1000;
+        }
         break;
       case arrow::TimeUnit::MICRO:
         epochSeconds = value / 1000000;
         subsecondFraction = value % 1000000;
         nFractionDigits = 6;
+        if (value < 0  && subsecondFraction != 0) {
+          epochSeconds -= 1;
+          subsecondFraction = (subsecondFraction + 1000000) % 1000000;
+        }
         break;
       case arrow::TimeUnit::NANO:
         epochSeconds = value / 1000000000;
         subsecondFraction = value % 1000000000;
         nFractionDigits = 9;
+        if (value < 0  && subsecondFraction != 0) {
+          epochSeconds -= 1;
+          subsecondFraction = (subsecondFraction + 1000000000) % 1000000000;
+        }
         break;
       default:
         std::cerr << "Failure: unsupported time unit " << timeUnit << std::endl;
