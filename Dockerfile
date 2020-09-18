@@ -34,7 +34,7 @@ RUN true \
 RUN true \
       && mkdir -p /src \
       && cd /src \
-      && curl http://mirror.cc.columbia.edu/pub/software/apache/arrow/arrow-0.16.0/apache-arrow-0.16.0.tar.gz | tar zx
+      && curl https://archive.apache.org/dist/arrow/arrow-0.16.0/apache-arrow-0.16.0.tar.gz | tar zx
 
 COPY arrow-patches/ /arrow-patches/
 
