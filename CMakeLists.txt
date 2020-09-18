@@ -23,6 +23,7 @@ project(parquet-to-arrow)
 include(FindPkgConfig)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake_modules")
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "/usr/local/lib/cmake/arrow")
 
 # This ensures that things like gnu++11 get passed correctly
 set(CMAKE_CXX_STANDARD 17)
@@ -33,19 +34,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(-Wall -Werror)
 
 # Look for installed packages the system
-find_library(THRIFT NAMES libthrift.a libthriftd.a)
-find_package(GFLAGS REQUIRED)
-pkg_search_module(ARROW REQUIRED arrow)
-pkg_search_module(PARQUET REQUIRED parquet)
-pkg_search_module(JEMALLOC REQUIRED jemalloc)
+find_package(gflags REQUIRED)
+find_package(Arrow REQUIRED)
+find_package(Parquet REQUIRED)
+find_package(Snappy REQUIRED)
 
 include_directories(SYSTEM ${ARROW_INCLUDE_DIR} ${PARQUET_INCLUDE_DIR} ${GFLAGS_INCLUDE_DIRS})
+# From https://github.com/apache/arrow/blob/afe5515754d4c4f67a0e5ee066513f8383f00d70/cpp/examples/minimal_build/CMakeLists.txt#L37
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
+set(COMMON_LIBS Threads::Threads parquet_static arrow_static snappy)
 
 add_executable(parquet-diff src/parquet-diff.cc src/common.cc)
-target_link_libraries(parquet-diff ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} ${JEMALLOC_STATIC_LDFLAGS} ${GFLAGS_STATIC_LDFLAGS} -static -lpthread -lsnappy -ldouble-conversion -lboost_regex -lboost_filesystem -lboost_system)
+target_link_libraries(parquet-diff PRIVATE -static ${COMMON_LIBS})
 
 add_executable(parquet-to-arrow src/parquet-to-arrow.cc src/common.cc)
-target_link_libraries(parquet-to-arrow ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} ${JEMALLOC_STATIC_LDFLAGS} -static -lpthread -lsnappy -lboost_regex -lboost_filesystem -lboost_system)
+target_link_libraries(parquet-to-arrow PRIVATE -static ${COMMON_LIBS})
 
 add_executable(parquet-to-text-stream src/parquet-to-text-stream.cc src/common.cc src/range.cc)
-target_link_libraries(parquet-to-text-stream ${PARQUET_STATIC_LDFLAGS} ${ARROW_STATIC_LDFLAGS} ${THRIFT} ${JEMALLOC_STATIC_LDFLAGS} ${GFLAGS_STATIC_LDFLAGS} -static -lgflags -lpthread -lsnappy -lboost_regex -lboost_filesystem -lboost_system -ldouble-conversion)
+target_link_libraries(parquet-to-text-stream PRIVATE -static -lgflags ${COMMON_LIBS})
+
+install(TARGETS parquet-diff parquet-to-arrow parquet-to-text-stream DESTINATION /usr/bin)

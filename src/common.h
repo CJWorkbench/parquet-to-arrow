@@ -20,6 +20,5 @@ static inline T ASSERT_ARROW_OK(arrow::Result<T> result, const char* message)
 }
 
 
-arrow::Status decodeIfDictionary(std::shared_ptr<arrow::Array>* array);
-arrow::Status chunkedArrayToArray(const arrow::ChunkedArray& input, std::shared_ptr<arrow::Array>* output);
+std::shared_ptr<arrow::Array> chunkedArrayToArray(const arrow::ChunkedArray& input);
 void writeArrowTable(const arrow::Table& arrowTable, const std::string& path);

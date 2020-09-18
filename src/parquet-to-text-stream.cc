@@ -7,12 +7,13 @@
 #include <cmath>
 #include <cinttypes>
 #include <cstdio>
-#include <cstdlib>
+#include <cstdlib>  // setenv
 #include <ctime>
 
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
+#include <arrow/util/thread_pool.h>
 #include <double-conversion/double-conversion.h> // already a dep of arrow; and printf won't do
 #include <gflags/gflags.h>
 #include <parquet/api/reader.h>
@@ -67,7 +68,7 @@ struct Printer : public arrow::ArrayVisitor {
     : fp(aFp)
     , columnName(nullptr)
     , columnIndex(0)
-    , arrayIndex(0)
+    , arrayIndex(0) // beware HACK in Visit(DictionaryArray): we modify this mid-read
     , doubleBuilder(this->doubleBuffer, this->kBufferSize)
     , doubleConverter(double_conversion::DoubleToStringConverter::EcmaScriptConverter())
   {
@@ -230,14 +231,19 @@ struct Printer : public arrow::ArrayVisitor {
   }
 
   VISIT_TODO(arrow::ExtensionArray)
-  VISIT_TODO(arrow::DictionaryArray) // we decode dictionaries while reading
-  VISIT_TODO(arrow::UnionArray)
   VISIT_TODO(arrow::StructArray)
   VISIT_TODO(arrow::FixedSizeListArray)
   VISIT_TODO(arrow::MapArray)
   VISIT_TODO(arrow::ListArray)
   VISIT_TODO(arrow::DurationArray)
 #undef VISIT_TODO
+
+  arrow::Status Visit(const arrow::DictionaryArray& array) override {
+    // HACK: set this->arrayIndex and recurse. The nested Visit() will look to
+    // the dictionary index.
+    this->arrayIndex = array.GetValueIndex(this->arrayIndex);
+    return array.dictionary()->Accept(this);
+  }
 
   arrow::Status Visit(const arrow::StringArray& array) override {
     const std::string value = array.GetString(this->arrayIndex);
@@ -437,10 +443,7 @@ struct ColumnIterator {
         this->batch.reset();
         return false;
       } else {
-        ASSERT_ARROW_OK(chunkedArrayToArray(*columnChunks, &this->batch), "concatenating column chunks");
-        // If it's a dict, decode it. (It would be nice to decode one value at a time, but that's
-        // hard to achieve with the Arrow API. Decoding a batch at a time isn't bad.)
-        ASSERT_ARROW_OK(decodeIfDictionary(&this->batch), "decoding dictionary values");
+        this->batch = chunkedArrayToArray(*columnChunks);
         this->batchIndex = 0;
       }
     }
@@ -462,6 +465,13 @@ struct ColumnIterator {
 
 static void
 streamParquet(const std::string& path, Printer& printer, Range columnRange, Range rowRange) {
+  // https://issues.apache.org/jira/browse/ARROW-10033
+  // Arrow 1.0.1 will _always_ spin up a thread pool, even though we don't want
+  // one and ask _not_ to have one. It's unused. Shrink it.
+  // You'd think we'd use arrow::SetCpuThreadPoolCapacity(1), but we don't
+  // because https://issues.apache.org/jira/browse/ARROW-10038
+  setenv("OMP_NUM_THREADS", "1", 1);
+
   std::shared_ptr<arrow::io::MemoryMappedFile> parquetFile(ASSERT_ARROW_OK(
     arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ),
     "opening Parquet file"

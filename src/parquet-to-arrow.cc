@@ -51,8 +51,7 @@ static std::shared_ptr<arrow::Table> readParquet(const std::string& path) {
   for (int i = 0; i < schema->num_fields(); i++) {
     std::shared_ptr<arrow::ChunkedArray> chunkedArray;
     ASSERT_ARROW_OK(parquetArrowReader->ReadColumn(i, &chunkedArray), "reading column");
-    std::shared_ptr<arrow::Array> columnArray;
-    ASSERT_ARROW_OK(chunkedArrayToArray(*chunkedArray, &columnArray), "concatenating column chunks");
+    std::shared_ptr<arrow::Array> columnArray = chunkedArrayToArray(*chunkedArray);
     arrays.push_back(columnArray);
   }
 

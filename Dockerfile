@@ -1,11 +1,18 @@
 FROM debian:buster AS cpp-builddeps
 
-# DEBUG SYMBOLS: to build with debug symbols (which help gdb), do these
-# changes (but don't commit them):
+# DEBUG SYMBOLS: to build with debug symbols (which help gdb), run
+# `docker build --build-arg CMAKE_BUILD_TYPE=Debug ...`
 #
-# * in Dockerfile, ensure libstdc++6-8-dbg is installed (this, we commit)
-# * in Dockerfile, set -DCMAKE_BUILD_TYPE=Debug when building Arrow
-# * in Dockerfile, set -DCMAKE_BUILD_TYPE=Debug when building parquet-to-arrow
+# We install libstdc++6-8-dbg, gdb and time regardless. They won't affect final
+# image size in Release mode.
+ARG CMAKE_BUILD_TYPE=Release
+
+# We build Arrow ourselves instead of using precompiled binaries. Two reasons:
+#
+# 1. File size. These statically-linked executables get copied and run a lot.
+#    Smaller files mean faster deploys (and marginally-faster start time).
+# 2. Dev experience. With --build-arg CMAKE_BUILD_TYPE=Debug, we can help this
+#    package's maintainer get a useful stack trace sooner.
 
 RUN true \
       && apt-get update \
@@ -16,6 +23,7 @@ RUN true \
           cmake \
           curl \
           flex \
+          gdb \
           g++ \
           gnupg \
           libboost-dev \
@@ -29,31 +37,37 @@ RUN true \
           pkg-config \
           python \
           tar \
+          time \
       && true
 
 RUN true \
       && mkdir -p /src \
       && cd /src \
-      && curl http://mirror.cc.columbia.edu/pub/software/apache/arrow/arrow-0.16.0/apache-arrow-0.16.0.tar.gz | tar zx
+      && curl https://apache.mirror.colo-serv.net/arrow/arrow-1.0.1/apache-arrow-1.0.1.tar.gz | tar xz
 
 COPY arrow-patches/ /arrow-patches/
 
 RUN true \
-      && cd /src/apache-arrow-0.16.0 \
+      && cd /src/apache-arrow-1.0.1 \
       && for patch in $(find /arrow-patches/*.diff | sort); do patch --verbose -p1 <$patch; done \
       && cd cpp \
-      && cmake -DARROW_PARQUET=ON -DARROW_COMPUTE=ON -DARROW_WITH_SNAPPY=ON -DARROW_OPTIONAL_INSTALL=ON -DARROW_BUILD_STATIC=ON -DARROW_BUILD_SHARED=OFF -DCMAKE_BUILD_TYPE=Release . \
+      && cmake \
+          -DARROW_PARQUET=ON \
+          -DARROW_COMPUTE=ON \
+          -DARROW_WITH_SNAPPY=ON \
+          -DARROW_OPTIONAL_INSTALL=ON \
+          -DARROW_BUILD_STATIC=ON \
+          -DARROW_BUILD_SHARED=OFF \
+          -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE . \
       && make -j4 arrow \
+      && make -j4 arrow_bundled_dependencies \
       && make -j4 parquet \
       && make install
 
-ENV PKG_CONFIG_PATH "/src/apache-arrow-0.16.0/cpp/jemalloc_ep-prefix/src/jemalloc_ep/dist/lib/pkgconfig"
-ENV CMAKE_PREFIX_PATH "/src/apache-arrow-0.16.0/cpp/thrift_ep/src/thrift_ep-install"
 
+FROM python:3.8.5-buster AS python-dev
 
-FROM python:3.8.1-buster AS python-dev
-
-RUN pip install pyarrow==0.16.0 pytest pandas==1.0.1 fastparquet==0.3.3
+RUN pip install pyarrow==1.0.1 pytest pandas==1.0.1 fastparquet==0.3.3
 
 RUN mkdir /app
 WORKDIR /app
@@ -65,24 +79,23 @@ RUN mkdir -p /app/src
 RUN touch /app/src/parquet-diff.cc /app/src/parquet-to-text-stream.cc /app/src/parquet-to-arrow.cc /app/src/common.cc /app/src/range.cc
 WORKDIR /app
 COPY CMakeLists.txt /app
-RUN cmake -DCMAKE_BUILD_TYPE=Release .
-#RUN cmake .
+# Redeclare CMAKE_BUILD_TYPE: its scope is its build stage
+ARG CMAKE_BUILD_TYPE=Release
+RUN cmake -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE .
 
 COPY src/ /app/src/
-RUN VERBOSE=true make -j4
+RUN VERBOSE=true make -j4 install/strip
+# Display size. In v2.1, it's ~7MB per executable.
+RUN ls -lh /usr/bin/parquet-*
 
 
 FROM python-dev AS test
 
-COPY --from=cpp-build /app/parquet-diff /usr/bin/parquet-diff
-COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
-COPY --from=cpp-build /app/parquet-to-text-stream /usr/bin/parquet-to-text-stream
+COPY --from=cpp-build /usr/bin/parquet-* /usr/bin/
 COPY tests/ /app/tests/
 WORKDIR /app
 RUN pytest -vv
 
 
 FROM scratch AS dist
-COPY --from=cpp-build /app/parquet-diff /usr/bin/parquet-diff
-COPY --from=cpp-build /app/parquet-to-arrow /usr/bin/parquet-to-arrow
-COPY --from=cpp-build /app/parquet-to-text-stream /usr/bin/parquet-to-text-stream
+COPY --from=cpp-build /usr/bin/parquet-* /usr/bin/
