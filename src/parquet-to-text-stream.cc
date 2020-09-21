@@ -7,12 +7,13 @@
 #include <cmath>
 #include <cinttypes>
 #include <cstdio>
-#include <cstdlib>
+#include <cstdlib>  // assert(), setenv()
 #include <ctime>
 
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
+#include <arrow/util/thread_pool.h>
 #include <double-conversion/double-conversion.h> // already a dep of arrow; and printf won't do
 #include <gflags/gflags.h>
 #include <parquet/api/reader.h>
@@ -42,93 +43,354 @@ DEFINE_string(column_range, "", "[start, end) range of columns to include");
 DEFINE_validator(column_range, &validate_range);
 
 
-// Batch size determines RAM usage and I/O.
-//
-// Lower value might mean "more seeking" (though we have not tested that).
-// Higher value means "more RAM".
-//
-// parquet-to-text-stream is designed for streaming data over the Internet. So
-// [adamhooper, 2019-09-23] my intuition is that the client side is slow;
-// therefore, I lean towards low RAM, high seeking.
-static const int BATCH_SIZE = 100;
+/* Batch size determines RAM usage and I/O.
+ *
+ * Lower value means more I/O operations. Higher value means larger RAM
+ * footprint.
+ *
+ * Benchmarking on 63MB, 70-col, 1M-row text file, with some dictionary-encoded
+ * columns on Intel(R) Core(TM) i5-6600K CPU @ 3.50GHz and command:
+ *
+ *   docker run -it --rm -v $(pwd):/data \
+ *     $(docker build . --target cpp-build -q) \
+ *     sh -c 'time ./parquet-to-text-stream /data/test.parquet csv > /dev/null'
+ *
+ * * BATCH_SIZE=10 => ~4.0s
+ * * BATCH_SIZE=20 => ~3.8s
+ * * BATCH_SIZE=30 => ~3.6s
+ * * BATCH_SIZE=50 => ~3.5s
+ * * BATCH_SIZE=100 => ~3.5s
+ * * BATCH_SIZE=500 => ~3.4s
+ * * BATCH_SIZE=1000 => ~3.4s
+ * * BATCH_SIZE=2000 => ~3.75s
+ * * BATCH_SIZE=5000 => ~3.9s
+ *
+ * parquet-to-text-stream is designed for streaming data over the Internet. We
+ * value time-to-first-byte (low BATCH_SIZE) and low RAM usage (low BATCH_SIZE).
+ * Per-column batch size can be rather large (64kb per text column), so err on
+ * the low side (while still trying to impress your friends, naturally).
+ */
+static const int BATCH_SIZE = 30;
 
 
-// when seeking, how quickly do we seek? Higher costs more RAM.
-static const int64_t SKIP_MAX_BATCH_SIZE = 10000;
+struct TimestampMillis { int64_t value; };
+struct TimestampMicros { int64_t value; };
+struct TimestampNanos { int64_t value; };
 
 
-// [adamhooper, 2019-09-25] a shoddy use of inheritance here
-// (Printer/CsvPrinter/JsonPrinter). Just making sure code is shared. This
-// could certainly be cleaned.
-struct Printer : public arrow::ArrayVisitor {
-  FILE* fp;
+template<typename PhysicalType, typename PrintableType>
+PrintableType physical_to_printable(PhysicalType value)
+{
+  return static_cast<PrintableType>(value);
+}
 
-  Printer (FILE* aFp)
-    : fp(aFp)
-    , columnName(nullptr)
-    , columnIndex(0)
-    , arrayIndex(0)
-    , doubleBuilder(this->doubleBuffer, this->kBufferSize)
-    , doubleConverter(double_conversion::DoubleToStringConverter::EcmaScriptConverter())
+template<>
+TimestampMillis physical_to_printable(int64_t value)
+{
+  return TimestampMillis { value };
+}
+
+template<>
+TimestampMicros physical_to_printable(int64_t value)
+{
+  return TimestampMicros { value };
+}
+
+template<>
+TimestampNanos physical_to_printable(int64_t value)
+{
+  return TimestampNanos { value };
+}
+
+template<>
+std::string_view physical_to_printable(parquet::ByteArray value) {
+  return std::string_view(reinterpret_cast<const char*>(value.ptr), value.len);
+}
+
+
+template<typename ColumnReaderType_, typename PrintableType_>
+class BufferedColumnReader {
+public:
+  typedef ColumnReaderType_ ColumnReaderType;
+  typedef typename ColumnReaderType::T PhysicalType;
+  typedef PrintableType_ PrintableType;
+
+private:
+  std::shared_ptr<ColumnReaderType> parquetReader;
+  std::array<PhysicalType, BATCH_SIZE> batch;
+  // `batchValid`: Arrow bitset must "be able to store 1 bit more than required"
+  // 0 values => 1 byte
+  // 1 value => 1 byte
+  // 7 values => 1 byte
+  // 8 values => 2 bytes
+  // 9 values => 2 bytes
+  std::array<uint8_t, BATCH_SIZE / 8 + 1> batchValid;
+  int64_t batchSize;
+  int64_t batchCursor;
+
+public:
+
+  BufferedColumnReader(std::shared_ptr<ColumnReaderType> parquetReader_)
+    : parquetReader(parquetReader_)
+    , batchSize(0)
+    , batchCursor(0)
   {
-    std::fill(this->doubleBuffer, this->doubleBuffer + this->kBufferSize, 0);
+    assert(parquetReader->descr()->max_definition_level() == 1);
+    assert(parquetReader->descr()->max_repetition_level() == 0);
   }
 
-  void prepare(int aColumnIndex, const std::string* aColumnName, int aArrayIndex) {
-    this->columnIndex = aColumnIndex;
-    this->columnName = aColumnName;
-    this->arrayIndex = aArrayIndex;
+  void skipRows(int64_t toSkip) {
+    int64_t skipInBatch = std::min(toSkip, this->batchSize - this->batchCursor);
+
+    // Skip within the batch
+    this->batchCursor += skipInBatch;
+    toSkip -= skipInBatch;
+
+    // Skip _past_ the batch
+    [[maybe_unused]] auto nSkipped = this->parquetReader->Skip(toSkip);
+    assert(nSkipped == toSkip);
+  }
+
+  /**
+   * Return the next value, or std::nullopt if it is null.
+   *
+   * Undefined behavior if there is no next element.
+   */
+  std::optional<PrintableType> next() {
+    if (this->batchCursor >= this->batchSize) {
+      this->rebuffer();
+
+      // Crash if calling next() when hasNext() is false
+      assert(this->batchCursor < this->batchSize);
+    }
+
+    std::optional<PrintableType> ret;
+    bool isValid = arrow::BitUtil::GetBit(&this->batchValid[0], this->batchCursor);
+    if (isValid) { // "valid" means "not-null"
+      ret = physical_to_printable<PhysicalType, PrintableType>(this->batch[this->batchCursor]);
+    }
+    this->batchCursor++;
+    return ret;
+  }
+
+private:
+  void rebuffer() {
+    std::array<int16_t, BATCH_SIZE> def_levels;
+    int64_t levels_read;
+    int64_t values_read;
+    int64_t null_count;
+
+    this->batchSize = this->parquetReader->ReadBatchSpaced(
+      BATCH_SIZE,
+      &def_levels[0], // non-required fields have max_definition_level==1
+      nullptr,
+      &this->batch[0],
+      &this->batchValid[0],
+      0, // valid_bits_offset
+      &levels_read,
+      &values_read,
+      &null_count
+    );
+    this->batchCursor = 0;
+  }
+};
+
+using BufferedFloatColumnReader = BufferedColumnReader<parquet::FloatReader, float>;
+using BufferedDoubleColumnReader = BufferedColumnReader<parquet::DoubleReader, double>;
+using BufferedInt32ColumnReader = BufferedColumnReader<parquet::Int32Reader, int32_t>;
+using BufferedInt64ColumnReader = BufferedColumnReader<parquet::Int64Reader, int64_t>;
+using BufferedUint32ColumnReader = BufferedColumnReader<parquet::Int32Reader, uint32_t>;
+using BufferedUint64ColumnReader = BufferedColumnReader<parquet::Int64Reader, uint64_t>;
+using BufferedStringColumnReader = BufferedColumnReader<parquet::ByteArrayReader, std::string_view>;
+using BufferedTimestampMillisColumnReader = BufferedColumnReader<parquet::Int64Reader, TimestampMillis>;
+using BufferedTimestampMicrosColumnReader = BufferedColumnReader<parquet::Int64Reader, TimestampMicros>;
+using BufferedTimestampNanosColumnReader = BufferedColumnReader<parquet::Int64Reader, TimestampNanos>;
+
+
+template<typename BufferedReaderType>
+class FileColumnIterator
+{
+public:
+  typedef typename BufferedReaderType::ColumnReaderType ColumnReaderType;
+  typedef typename BufferedReaderType::PrintableType PrintableType;
+
+private:
+  parquet::ParquetFileReader& fileReader;
+  std::unique_ptr<BufferedReaderType> currentReader;
+  int columnIndex;
+  std::string_view name; // lasts as long as the fileReader
+  int currentRowGroup;
+  int currentReaderCursor;
+  int currentReaderSize;
+
+public:
+  FileColumnIterator(parquet::ParquetFileReader& fileReader, int columnIndex_)
+    : fileReader(fileReader)
+    , columnIndex(columnIndex_)
+    , name(fileReader.metadata()->schema()->Column(columnIndex_)->name())
+    , currentRowGroup(-1) // incremented to 0 in ctor, in loadNextRowGroup()
+    , currentReaderCursor(0)
+    , currentReaderSize(0)
+
+  {
+    this->loadNextRowGroup();
+  }
+
+  std::string_view getName() const {
+    return this->name;
+  }
+
+  void skipRows(int64_t toSkip) {
+    while (toSkip > this->currentReaderSize - this->currentReaderCursor)
+    {
+      toSkip -= (this->currentReaderSize - this->currentReaderCursor);
+      this->loadNextRowGroup();
+    }
+    this->currentReader->skipRows(toSkip);
+    this->currentReaderCursor += toSkip;
+  }
+
+  /**
+   * Return the next value, or std::nullopt if it is null.
+   *
+   * Undefined behavior if there is no next element.
+   */
+  std::optional<PrintableType> next() {
+    if (this->currentReaderCursor >= this->currentReaderSize)
+    {
+      this->loadNextRowGroup();
+      assert(this->currentReaderCursor < this->currentReaderSize);
+    }
+
+    this->currentReaderCursor++;
+    return this->currentReader->next();
+  }
+
+private:
+  void loadNextRowGroup() {
+    this->currentRowGroup++;
+    std::shared_ptr<parquet::RowGroupReader> rowGroupReader(this->fileReader.RowGroup(this->currentRowGroup));
+    std::shared_ptr<parquet::ColumnReader> columnReader(rowGroupReader->Column(this->columnIndex));
+    std::shared_ptr<ColumnReaderType> typedColumnReader = std::dynamic_pointer_cast<ColumnReaderType>(columnReader);
+    if (!typedColumnReader) {
+      throw std::runtime_error(
+        std::string("Could not cast column reader ") + columnReader->descr()->ToString() + " to desired type"
+      );
+    }
+    this->currentReader = std::make_unique<BufferedReaderType>(typedColumnReader);
+    this->currentReaderCursor = 0;
+    this->currentReaderSize = rowGroupReader->metadata()->num_rows();
+  }
+};
+
+
+class Printer {
+  static const int kBufferSize = 128; // the number in https://github.com/google/double-conversion/blob/master/test/cctest/test-conversions.cc
+  std::array<char, kBufferSize> doubleBuffer;
+  double_conversion::StringBuilder doubleBuilder;
+  const double_conversion::DoubleToStringConverter& doubleConverter;
+protected:
+  FILE* fp;
+
+public:
+  Printer(FILE* fp_)
+    : doubleBuilder(&this->doubleBuffer[0], this->kBufferSize)
+    , doubleConverter(double_conversion::DoubleToStringConverter::EcmaScriptConverter())
+    , fp(fp_)
+  {
   }
 
   virtual void writeFileHeader() = 0; // JSON '['
   virtual void writeFileFooter() = 0; // JSON ']'
-  virtual void writeRecordStart(bool isFirst) = 0; // JSON '{'; CSV '\n'
+  virtual void writeRecordStart(int rowIndex) = 0; // JSON '{'; CSV '\n'
   virtual void writeRecordStop() = 0; // JSON '}'
-  virtual void writeFieldStart() = 0; // JSON field name; CSV comma
-  virtual void writeHeaderField() = 0; // CSV field name
-  virtual void writeNull() = 0; // CSV '', JSON 'null'
-  virtual void writeString(const std::string& value) = 0; // escaped
-  virtual void writeTimestamp(int64_t value, arrow::TimeUnit::type timeUnit) = 0;
+  virtual void writeFieldStart(int columnIndex, std::string_view name) = 0; // JSON field name; CSV comma
+  virtual void writeHeaderField(int columnIndex, std::string_view name) = 0; // CSV field name
 
-  void writeRawShortISO8601UTCTimestamp(int64_t value, arrow::TimeUnit::type timeUnit) {
+  virtual void writeNull() = 0; // CSV '', JSON 'null'
+  virtual void writeString(std::string_view value) = 0; // escaped
+
+  void write(TimestampMillis value) { this->writeTimestamp(value.value, 3); }
+  void write(TimestampMicros value) { this->writeTimestamp(value.value, 6); }
+  void write(TimestampNanos value) { this->writeTimestamp(value.value, 9); }
+  void write(std::string_view value) { this->writeString(value); }
+
+  // It just so happens JSON and CSV write numbers exactly the same way:
+  void write(float value) {
+    if (std::isfinite(value)) {
+      this->doubleBuilder.Reset();
+      if (this->doubleConverter.ToShortestSingle(value, &this->doubleBuilder)) {
+        // No need to call this->doubleBuilder.Finalize() because we know
+        // where the string ends.
+        fwrite_unlocked(&this->doubleBuffer[0], 1, this->doubleBuilder.position(), this->fp);
+      } else {
+        std::cerr << "Failed to convert float: " << value << std::endl;
+        // I guess we can recover from this. According to the docs, there's no
+        // way for this to ever happen anyway.
+      }
+    } else {
+      // Text mode: NaN, +inf and -inf are all null (empty string)
+      this->writeNull();
+    }
+  }
+
+  void write(double value) {
+    if (std::isfinite(value)) {
+      this->doubleBuilder.Reset();
+      if (this->doubleConverter.ToShortest(value, &this->doubleBuilder)) {
+        // No need to call this->doubleBuilder.Finalize() because we know
+        // where the string ends.
+        fwrite_unlocked(&this->doubleBuffer[0], 1, this->doubleBuilder.position(), this->fp);
+      } else {
+        std::cerr << "Failed to convert float: " << value << std::endl;
+        // I guess we can recover from this. According to the docs, there's no
+        // way for this to ever happen anyway.
+      }
+    } else {
+      // Text mode: NaN, +inf and -inf are all null (empty string)
+      this->writeNull();
+    }
+  }
+
+  void write(int32_t value) { fprintf(this->fp, "%" PRIi32, value); }
+  void write(int64_t value) { fprintf(this->fp, "%" PRIi64, value); }
+  void write(uint32_t value) { fprintf(this->fp, "%" PRIu32, value); }
+  void write(uint64_t value) { fprintf(this->fp, "%" PRIu64, value); }
+
+protected:
+
+  virtual void writeTimestamp(int64_t value, int nFractionDigits) = 0;
+
+  void writeRawShortISO8601UTCTimestamp(int64_t value, int nFractionDigits) {
     int64_t epochSeconds;
     int subsecondFraction;
-    int nFractionDigits;
-    switch (timeUnit) {
-      case arrow::TimeUnit::SECOND:
-        epochSeconds = value;
-        subsecondFraction = 0;
-        nFractionDigits = 0;
-        break;
-      case arrow::TimeUnit::MILLI:
+    switch (nFractionDigits) {
+      case 3:
         epochSeconds = value / 1000;
         subsecondFraction = value % 1000;
-        nFractionDigits = 3;
         if (value < 0  && subsecondFraction != 0) {
           epochSeconds -= 1;
           subsecondFraction = (subsecondFraction + 1000) % 1000;
         }
         break;
-      case arrow::TimeUnit::MICRO:
+      case 6:
         epochSeconds = value / 1000000;
         subsecondFraction = value % 1000000;
-        nFractionDigits = 6;
         if (value < 0  && subsecondFraction != 0) {
           epochSeconds -= 1;
           subsecondFraction = (subsecondFraction + 1000000) % 1000000;
         }
         break;
-      case arrow::TimeUnit::NANO:
+      case 9:
         epochSeconds = value / 1000000000;
         subsecondFraction = value % 1000000000;
-        nFractionDigits = 9;
         if (value < 0  && subsecondFraction != 0) {
           epochSeconds -= 1;
           subsecondFraction = (subsecondFraction + 1000000000) % 1000000000;
         }
         break;
       default:
-        std::cerr << "Failure: unsupported time unit " << timeUnit << std::endl;
+        std::cerr << "Failure: unsupported nFractionDigits " << nFractionDigits << std::endl;
         std::_Exit(1);
     }
 
@@ -166,102 +428,6 @@ struct Printer : public arrow::ArrayVisitor {
       fprintf(this->fp, "T%02d:%02d:%02d.%09dZ", time.tm_hour, time.tm_min, time.tm_sec, subsecondFraction);
     }
   }
-
-#define VISIT_PRINTF(arrayType, format) \
-  arrow::Status Visit(const arrayType& array) { \
-    const arrayType::value_type value = array.Value(this->arrayIndex); \
-    fprintf(this->fp, format, value); \
-    return arrow::Status::OK(); \
-  }
-
-  VISIT_PRINTF(arrow::Int8Array, "%" PRIi8)
-  VISIT_PRINTF(arrow::Int16Array, "%" PRIi16)
-  VISIT_PRINTF(arrow::Int32Array, "%" PRIi32)
-  VISIT_PRINTF(arrow::Int64Array, "%" PRIi64)
-  VISIT_PRINTF(arrow::UInt8Array, "%" PRIu8)
-  VISIT_PRINTF(arrow::UInt16Array, "%" PRIu16)
-  VISIT_PRINTF(arrow::UInt32Array, "%" PRIu32)
-  VISIT_PRINTF(arrow::UInt64Array, "%" PRIu64)
-#undef VISIT_PRINTF
-
-  arrow::Status Visit(const arrow::FloatArray& array) override {
-    float value = array.Value(this->arrayIndex);
-    if (std::isfinite(value)) {
-      this->doubleBuilder.Reset();
-      if (this->doubleConverter.ToShortestSingle(value, &this->doubleBuilder)) {
-        // No need to call this->doubleBuilder.Finalize() because we know
-        // where the string ends.
-        fwrite_unlocked(this->doubleBuffer, 1, this->doubleBuilder.position(), this->fp);
-      } else {
-        std::cerr << "Failed to convert float: " << value << std::endl;
-        // I guess we can recover from this. According to the docs, there's no
-        // way for this to ever happen anyway.
-      }
-    } else {
-      // Text mode: NaN, +inf and -inf are all null (empty string)
-      this->writeNull();
-    }
-    return arrow::Status::OK();
-  }
-
-  arrow::Status Visit(const arrow::DoubleArray& array) override {
-    double value = array.Value(this->arrayIndex);
-    if (std::isfinite(value)) {
-      this->doubleBuilder.Reset();
-      if (this->doubleConverter.ToShortest(value, &this->doubleBuilder)) {
-        // No need to call this->doubleBuilder.Finalize() because we know
-        // where the string ends.
-        fwrite_unlocked(this->doubleBuffer, 1, this->doubleBuilder.position(), this->fp);
-      } else {
-        std::cerr << "Failed to convert float: " << value << std::endl;
-        // I guess we can recover from this. According to the docs, there's no
-        // way for this to ever happen anyway.
-      }
-    } else {
-      // Text mode: NaN, +inf and -inf are all null (empty string)
-      this->writeNull();
-    }
-    return arrow::Status::OK();
-  }
-
-#define VISIT_TODO(arrayType) \
-  arrow::Status Visit(const arrayType& array) override { \
-    return arrow::Status::NotImplemented("TODO: unhandled column type"); \
-  }
-
-  VISIT_TODO(arrow::ExtensionArray)
-  VISIT_TODO(arrow::DictionaryArray) // we decode dictionaries while reading
-  VISIT_TODO(arrow::UnionArray)
-  VISIT_TODO(arrow::StructArray)
-  VISIT_TODO(arrow::FixedSizeListArray)
-  VISIT_TODO(arrow::MapArray)
-  VISIT_TODO(arrow::ListArray)
-  VISIT_TODO(arrow::DurationArray)
-#undef VISIT_TODO
-
-  arrow::Status Visit(const arrow::StringArray& array) override {
-    const std::string value = array.GetString(this->arrayIndex);
-    this->writeString(value);
-    return arrow::Status::OK();
-  }
-
-  arrow::Status Visit(const arrow::TimestampArray& array) override {
-    const int64_t value = array.Value(this->arrayIndex);
-    const arrow::TimestampType* type = dynamic_cast<arrow::TimestampType*>(array.type().get());
-    this->writeTimestamp(value, type->unit());
-    return arrow::Status::OK();
-  }
-
-protected:
-  const std::string* columnName;
-  int columnIndex;
-  int arrayIndex;
-
-private:
-  static const int kBufferSize = 128; // the number in https://github.com/google/double-conversion/blob/master/test/cctest/test-conversions.cc
-  char doubleBuffer[kBufferSize];
-  double_conversion::StringBuilder doubleBuilder;
-  const double_conversion::DoubleToStringConverter& doubleConverter;
 };
 
 
@@ -272,26 +438,26 @@ struct CsvPrinter : public Printer {
   void writeFileFooter() override {}
   void writeRecordStop() override {}
 
-  void writeRecordStart(bool isFirst) override {
+  void writeRecordStart(int rowIndex) override {
     fputc_unlocked('\n', this->fp); // newline -- start new CSV record
   }
 
-  void writeFieldStart() override {
-    if (this->columnIndex > 0) {
+  void writeFieldStart(int columnIndex, std::string_view name) override {
+    if (columnIndex > 0) {
       fputc_unlocked(',', this->fp);
     }
   }
 
-  void writeHeaderField() override {
-    this->writeFieldStart();
-    this->writeString(*this->columnName);
+  void writeHeaderField(int columnIndex, std::string_view name) override {
+    this->writeFieldStart(columnIndex, name);
+    this->writeString(name);
   }
 
   void writeNull() override {
     // CSV: null is empty string. Write nothing.
   }
 
-  void writeString(const std::string& value) override {
+  void writeString(std::string_view value) override {
     bool needQuote = false;
     for (const char& c: value) {
         // assume UTF-8 -- it's okay to ascii-compare it
@@ -302,7 +468,7 @@ struct CsvPrinter : public Printer {
     }
 
     if (!needQuote) {
-      fwrite_unlocked(value.c_str(), 1, value.size(), this->fp);
+      fwrite_unlocked(value.data(), 1, value.size(), this->fp);
     } else {
       fputc_unlocked('"', this->fp);
       size_t nWritten = 0;
@@ -310,10 +476,10 @@ struct CsvPrinter : public Printer {
         const size_t quote_pos = value.find('"', nWritten);
         if (quote_pos == std::string::npos) {
           // No more quotation marks
-          fwrite_unlocked(value.c_str() + nWritten, 1, value.size() - nWritten, this->fp);
+          fwrite_unlocked(value.data() + nWritten, 1, value.size() - nWritten, this->fp);
           nWritten = value.size();
         } else {
-          fwrite_unlocked(value.c_str() + nWritten, 1, quote_pos - nWritten, this->fp);
+          fwrite_unlocked(value.data() + nWritten, 1, quote_pos - nWritten, this->fp);
           fwrite_unlocked("\"\"", 1, 2, this->fp);
           nWritten = quote_pos + 1;
         }
@@ -322,8 +488,8 @@ struct CsvPrinter : public Printer {
     }
   }
 
-  void writeTimestamp(int64_t value, arrow::TimeUnit::type timeUnit) override {
-    this->writeRawShortISO8601UTCTimestamp(value, timeUnit);
+  void writeTimestamp(int64_t value, int nFractionDigits) override {
+    this->writeRawShortISO8601UTCTimestamp(value, nFractionDigits);
   }
 };
 
@@ -339,8 +505,8 @@ struct JsonPrinter : public Printer {
     fputc_unlocked(']', this->fp); // end array
   }
 
-  void writeRecordStart(bool isFirst) override {
-    if (!isFirst) {
+  void writeRecordStart(int rowIndex) override {
+    if (rowIndex != 0) {
       fputc_unlocked(',', this->fp);
     }
     fputc_unlocked('{', this->fp); // begin object
@@ -350,23 +516,23 @@ struct JsonPrinter : public Printer {
     fputc_unlocked('}', this->fp); // end object
   }
 
-  void writeFieldStart() override {
-    if (this->columnIndex > 0) {
+  void writeFieldStart(int columnIndex, std::string_view name) override {
+    if (columnIndex > 0) {
       fputc_unlocked(',', this->fp);
     }
-    this->writeString(*this->columnName);
+    this->writeString(name);
     fputc_unlocked(':', this->fp);
   }
 
-  void writeHeaderField() override {
+  void writeHeaderField(int columnIndex, std::string_view name) override {
     // JSON has no header
   }
 
-  virtual void writeNull() override {
+  void writeNull() override {
     fwrite_unlocked("null", 1, 4, this->fp);
   }
 
-  void writeString(const std::string& value) override {
+  void writeString(std::string_view value) override {
     fputc_unlocked('"', this->fp);
     for (const char& c: value) {
       // assume UTF-8 -- it's okay to ascii-compare it
@@ -389,125 +555,236 @@ struct JsonPrinter : public Printer {
     fputc_unlocked('"', this->fp);
   }
 
-  void writeTimestamp(int64_t value, arrow::TimeUnit::type timeUnit) override {
+  void writeTimestamp(int64_t value, int nFractionDigits) override {
     fputc_unlocked('"', this->fp);
-    this->writeRawShortISO8601UTCTimestamp(value, timeUnit);
+    this->writeRawShortISO8601UTCTimestamp(value, nFractionDigits);
     fputc_unlocked('"', this->fp);
   }
 };
 
 
-struct ColumnIterator {
-  int columnIndex;
-  const std::string name;
-  int rowIndex;
-  int nRows;
-  std::unique_ptr<parquet::arrow::ColumnReader> columnReader;
-  int batchIndex;
-  std::shared_ptr<arrow::Array> batch;
+class Transcriber
+{
+public:
+  Transcriber(Printer& printer_) : printer(printer_) {}
 
-  ColumnIterator(int aColumnIndex, const std::string& aName, int aNRows, std::unique_ptr<parquet::arrow::ColumnReader> aReader)
-    : columnIndex(aColumnIndex), name(aName), rowIndex(-1), nRows(aNRows), columnReader(std::move(aReader)), batchIndex(-1), batch(nullptr)
+  // https://en.cppreference.com/w/cpp/memory/unique_ptr:
+  // If T is a derived class of some base B, then std::unique_ptr<T> is
+  // implicitly convertible to std::unique_ptr<B>. The default deleter of the
+  // resulting std::unique_ptr<B> will use operator delete for B, leading to
+  // undefined behavior unless the destructor of B is virtual.
+  virtual ~Transcriber() {}
+
+  /**
+   * Skip nRows values.
+   *
+   * Undefined behavior if there are not that many values to skip.
+   */
+  virtual void skipRows(int64_t nRows) = 0;
+
+  /**
+   * Print the next value.
+   *
+   * Undefined behavior if there is no next element.
+   */
+  virtual void printNext(size_t outputColumnIndex) = 0;
+
+  /**
+   * Print the header field (CSV-only).
+   */
+  virtual void printHeaderField(size_t outputColumnIndex) = 0;
+
+protected:
+  Printer& printer;
+};
+
+
+template<typename FileColumnIteratorType>
+class BufferedTranscriber : public Transcriber
+{
+public:
+  typedef typename FileColumnIteratorType::PrintableType PrintableType;
+
+private:
+  std::unique_ptr<FileColumnIteratorType> reader;
+
+public:
+  BufferedTranscriber(Printer& printer, std::unique_ptr<FileColumnIteratorType> reader_)
+    : Transcriber(printer)
+    , reader(std::move(reader_))
   {
   }
 
-  void skipRows(int64_t toSkip) {
-    std::shared_ptr<arrow::ChunkedArray> columnChunks;
-    while (toSkip > 0) {
-      const int64_t batchSize = std::min(toSkip, SKIP_MAX_BATCH_SIZE);
-      ASSERT_ARROW_OK(this->columnReader->NextBatch(batchSize, &columnChunks), "skipping column data");
-      columnChunks = nullptr; // free RAM
-      toSkip -= batchSize;
-    }
-  }
+  void printNext(size_t outputColumnIndex) override
+  {
+    this->printer.writeFieldStart(outputColumnIndex, this->reader->getName());
 
-  bool advanceToNextValueIfAvailable() {
-    this->batchIndex++;
-    this->rowIndex++;
-    if (this->rowIndex == this->nRows) {
-      if (this->batch) {
-        this->batch.reset();
-      }
-      return false;
-    }
-    if (this->batch.get() == nullptr || this->batchIndex >= this->batch->length()) {
-      std::shared_ptr<arrow::ChunkedArray> columnChunks;
-      ASSERT_ARROW_OK(this->columnReader->NextBatch(std::min(BATCH_SIZE, this->nRows - this->rowIndex), &columnChunks), "reading batch");
-      if (columnChunks.get() == nullptr || columnChunks->length() == 0) {
-        this->batch.reset();
-        return false;
-      } else {
-        ASSERT_ARROW_OK(chunkedArrayToArray(*columnChunks, &this->batch), "concatenating column chunks");
-        // If it's a dict, decode it. (It would be nice to decode one value at a time, but that's
-        // hard to achieve with the Arrow API. Decoding a batch at a time isn't bad.)
-        ASSERT_ARROW_OK(decodeIfDictionary(&this->batch), "decoding dictionary values");
-        this->batchIndex = 0;
-      }
-    }
-
-    return true;
-  }
-
-  void printCurrentValue(Printer& printer) {
-    printer.prepare(this->columnIndex, &this->name, this->batchIndex);
-    printer.writeFieldStart();
-    if (this->batch->IsNull(this->batchIndex)) {
-      printer.writeNull();
+    std::optional<PrintableType> valueOrNull = this->reader->next();
+    if (valueOrNull.has_value()) {
+      this->printer.write(valueOrNull.value());
     } else {
-      ASSERT_ARROW_OK(this->batch->Accept(&printer), "getting value");
+      this->printer.writeNull();
     }
+  }
+
+  void skipRows(int64_t nRows) override
+  {
+    this->reader->skipRows(nRows);
+  }
+
+  void printHeaderField(size_t outputColumnIndex) override
+  {
+    this->printer.writeHeaderField(outputColumnIndex, this->reader->getName());
   }
 };
+
+template<typename BufferedReaderType>
+static std::unique_ptr<Transcriber>
+makeTranscriber(parquet::ParquetFileReader& fileReader, int columnIndex, Printer& printer)
+{
+  typedef FileColumnIterator<BufferedReaderType> FileColumnIteratorType;
+  typedef BufferedTranscriber<FileColumnIteratorType> TranscriberType;
+
+  auto fileColumnIterator = std::make_unique<FileColumnIteratorType>(fileReader, columnIndex);
+  auto transcriber = std::make_unique<TranscriberType>(printer, std::move(fileColumnIterator));
+  return std::move(transcriber);
+}
+
+
+static std::unique_ptr<Transcriber>
+makeTranscriberForIntColumn(parquet::ParquetFileReader& fileReader, int columnIndex, Printer& printer)
+{
+  const auto descr = fileReader.metadata()->schema()->Column(columnIndex);
+  const parquet::LogicalType* logicalType = descr->logical_type().get();
+
+  if (logicalType->type() == parquet::LogicalType::Type::TIMESTAMP) {
+    const auto timestampType = dynamic_cast<const parquet::TimestampLogicalType*>(logicalType);
+    if (!timestampType) {
+      throw std::runtime_error("TIMESTAMP column did not convert to TimestampLogicalType");
+    }
+    // We ignore timestampType->is_adjusted_to_utc(): an obvious codepath like
+    // pa.array([], type=pa.timestamp(unit="ns")) isn't adjusted to UTC, so
+    // there's plenty of UTC data in the wild that isn't read as such.
+    //
+    // <opinionated>It would be an error in judgment for a developer to create
+    // a non-UTC timestamp, since one such value does not always represent one
+    // point in time. We won't pay any more attention to such
+    // shenanigans.</opinionated>
+
+    switch (timestampType->time_unit()) {
+      case parquet::LogicalType::TimeUnit::MILLIS:
+        return makeTranscriber<BufferedTimestampMillisColumnReader>(fileReader, columnIndex, printer);
+      case parquet::LogicalType::TimeUnit::MICROS:
+        return makeTranscriber<BufferedTimestampMicrosColumnReader>(fileReader, columnIndex, printer);
+      case parquet::LogicalType::TimeUnit::NANOS:
+        return makeTranscriber<BufferedTimestampNanosColumnReader>(fileReader, columnIndex, printer);
+      default:
+        throw std::runtime_error("Unknown TimeUnit in a TIMESTAMP column");
+    }
+  } else if (
+    logicalType->type() == parquet::LogicalType::Type::INT
+    // "NONE" means, signed-int
+    || logicalType->type() == parquet::LogicalType::Type::NONE
+  ) {
+    const auto intType = dynamic_cast<const parquet::IntLogicalType*>(logicalType);
+    // If logicalType->type() == NONE, then there's no intType; we assume signed
+    bool isSigned = (intType == nullptr || intType->is_signed());
+
+    // We don't care about intType->bit_width(): we handle numbers based on
+    // their _physical_ type, and Parquet only stores int32 and int64
+
+    switch (descr->physical_type()) {
+      case parquet::Type::INT32:
+        return isSigned
+          ? makeTranscriber<BufferedInt32ColumnReader>(fileReader, columnIndex, printer)
+          : makeTranscriber<BufferedUint32ColumnReader>(fileReader, columnIndex, printer);
+      case parquet::Type::INT64:
+        return isSigned
+          ? makeTranscriber<BufferedInt64ColumnReader>(fileReader, columnIndex, printer)
+          : makeTranscriber<BufferedUint64ColumnReader>(fileReader, columnIndex, printer);
+      default:
+        throw new std::logic_error("unreachable: physical type is not INT32 or INT64");
+    }
+  } else {
+    throw new std::runtime_error(
+      std::string("For INT32 and INT64, we only handle INT and TIMESTAMP types; got ")
+      + logicalType->ToString()
+    );
+  }
+}
+
+static std::unique_ptr<Transcriber>
+makeTranscriberForByteArrayColumn(parquet::ParquetFileReader& fileReader, int columnIndex, Printer& printer)
+{
+  const auto descr = fileReader.metadata()->schema()->Column(columnIndex);
+  const auto logicalType = descr->logical_type();
+  switch (logicalType->type()) {
+    case parquet::LogicalType::Type::STRING:
+      return makeTranscriber<BufferedStringColumnReader>(fileReader, columnIndex, printer);
+    default:
+      throw std::runtime_error(
+        std::string("For BYTE_ARRAY, we only handle STRING type; got ") + logicalType->ToString()
+      );
+  }
+}
+
+static std::unique_ptr<Transcriber>
+makeTranscriberForColumn(parquet::ParquetFileReader& fileReader, int columnIndex, Printer& printer)
+{
+  const auto descr = fileReader.metadata()->schema()->Column(columnIndex);
+  assert(descr->max_definition_level() == 1);
+  assert(descr->max_repetition_level() == 0);
+  switch (descr->physical_type()) {
+    case parquet::Type::INT32:
+    case parquet::Type::INT64:
+      return makeTranscriberForIntColumn(fileReader, columnIndex, printer);
+    case parquet::Type::FLOAT:
+      return makeTranscriber<BufferedFloatColumnReader>(fileReader, columnIndex, printer);
+    case parquet::Type::DOUBLE:
+      return makeTranscriber<BufferedDoubleColumnReader>(fileReader, columnIndex, printer);
+    case parquet::Type::BYTE_ARRAY:
+      return makeTranscriberForByteArrayColumn(fileReader, columnIndex, printer);
+    default:
+      throw std::runtime_error(std::string("Cannot read physical type: ") + descr->ToString());
+  }
+}
 
 
 static void
 streamParquet(const std::string& path, Printer& printer, Range columnRange, Range rowRange) {
-  std::shared_ptr<arrow::io::MemoryMappedFile> parquetFile(ASSERT_ARROW_OK(
-    arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ),
-    "opening Parquet file"
-  ));
-  std::unique_ptr<parquet::arrow::FileReader> arrowReader;
-  ASSERT_ARROW_OK(parquet::arrow::OpenFile(parquetFile, arrow::default_memory_pool(), &arrowReader), "creating Parquet reader");
-  arrowReader->set_use_threads(false);
+  std::unique_ptr<parquet::ParquetFileReader> fileReader(
+    parquet::ParquetFileReader::OpenFile(path)
+  );
 
-  std::shared_ptr<arrow::Schema> schema;
-  ASSERT_ARROW_OK(arrowReader->GetSchema(&schema), "parsing Parquet schema");
+  columnRange = columnRange.clip(fileReader->metadata()->num_columns());
+  rowRange = rowRange.clip(fileReader->metadata()->num_rows());
 
-  int nRows = arrowReader->parquet_reader()->metadata()->num_rows();
-
-  columnRange = columnRange.clip(schema->num_fields());
-  rowRange = rowRange.clip(nRows);
-
-  std::vector<std::unique_ptr<ColumnIterator>> columnIterators(columnRange.size());
-  for (size_t i = 0; i < columnIterators.size(); i++) {
+  std::vector<std::unique_ptr<Transcriber>> transcribers(columnRange.size());
+  for (size_t i = 0; i < transcribers.size(); i++) {
     size_t columnIndex = columnRange.start + i;
-    std::unique_ptr<parquet::arrow::ColumnReader> columnReader;
-    ASSERT_ARROW_OK(arrowReader->GetColumn(columnIndex, &columnReader), "getting column");
-    columnIterators[i].reset(new ColumnIterator(i, schema->field(columnIndex)->name(), nRows, std::move(columnReader)));
-    columnIterators[i]->skipRows(static_cast<int64_t>(rowRange.start));
+    std::unique_ptr<Transcriber> transcriber(makeTranscriberForColumn(*fileReader, columnIndex, printer));
+    transcriber->skipRows(static_cast<int64_t>(rowRange.start));
+    transcribers[i] = std::move(transcriber);
   }
 
   // Write headers
   printer.writeFileHeader();
-  for (const auto& columnIterator : columnIterators) {
-    printer.prepare(columnIterator->columnIndex, &columnIterator->name, columnIterator->batchIndex);
-    printer.writeHeaderField();
-  }
-  if (columnIterators.size() > 0) {
-    for (auto row = rowRange.start; row < rowRange.stop; row++) {
-      for (auto& columnIterator : columnIterators) {
-        if (!columnIterator->advanceToNextValueIfAvailable()) {
-          goto footer;
-        }
-      }
-      printer.writeRecordStart(row == rowRange.start);
-      for (auto& columnIterator : columnIterators) {
-        columnIterator->printCurrentValue(printer);
+  if (transcribers.size() > 0) {
+    // Write headers
+    for (size_t outputColumnIndex = 0; outputColumnIndex < columnRange.size(); outputColumnIndex++) {
+      transcribers[outputColumnIndex]->printHeaderField(outputColumnIndex);
+    }
+
+    // Write rows
+    for (auto rowIndex = rowRange.start; rowIndex < rowRange.stop; rowIndex++) {
+      printer.writeRecordStart(rowIndex - rowRange.start);
+
+      for (size_t outputColumnIndex = 0; outputColumnIndex < columnRange.size(); outputColumnIndex++) {
+        transcribers[outputColumnIndex]->printNext(outputColumnIndex);
       }
       printer.writeRecordStop();
     }
   }
-footer:
   printer.writeFileFooter();
 }
 

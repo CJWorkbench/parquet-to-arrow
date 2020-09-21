@@ -108,6 +108,47 @@ jump in with an intermediate image. You can see all `IMAGE_ID`s in the
   volume means you can `make` or `pytest` immediately after you edit source
   code. (That's not normal.)
 
+GNU Time
+--------
+
+During development, we use rudimentary benchmarking with `/usr/bin/time`.
+
+To test how long it takes to run `parquet-to-text-stream ./big.parquet csv`,
+run:
+
+```
+# Build from scratch in Release mode, displaying lots of output so it doesn't
+# look stalled:
+docker build . --target cpp-build
+
+docker run -it --rm -v $(pwd):/data \
+    $(docker build . --target cpp-build -q) \
+    sh -c '/usr/bin/time parquet-to-text-stream /data/big.parquet csv >/dev/null'
+```
+
+(This will rebuild if you change Dockerfile, CMakeLists.txt or C++ code.)
+
+For a sense of scale: a 63MB Parquet file with some dictionary encoding, 1M rows
+and 70 columns should take 3-4s to convert to CSV on a 3.5Ghz Intel Skylake
+(tested 2020-09-21).
+
+GDB
+---
+
+To debug the program `parquet-to-text-stream` in GDB, with input file
+`./test.parquet` and argument `csv`:
+
+```
+# Build from scratch in Debug mode, displaying lots of output so it doesn't
+# look stalled:
+docker build . --build-arg CMAKE_BUILD_TYPE=Debug --target cpp-build
+
+docker run -it --rm -v $(pwd):/data \
+    $(docker build . --build-arg CMAKE_BUILD_TYPE=Debug --target cpp-build -q) \
+    gdb --args /usr/bin/parquet-to-text-stream ./test.parquet csv
+```
+
+(This will rebuild if you change Dockerfile, CMakeLists.txt or C++ code.)
 
 Deploying
 =========
