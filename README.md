@@ -128,6 +128,10 @@ docker run -it --rm -v $(pwd):/data \
 
 (This will rebuild if you change Dockerfile, CMakeLists.txt or C++ code.)
 
+For a sense of scale: a 63MB Parquet file with some dictionary encoding, 1M rows
+and 70 columns should take 3-4s to convert to CSV on a 3.5Ghz Intel Skylake
+(tested 2020-09-21).
+
 GDB
 ---
 
