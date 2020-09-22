@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <memory>
 #include <arrow/array/concatenate.h>
-#include <arrow/compute/api.h>
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
 

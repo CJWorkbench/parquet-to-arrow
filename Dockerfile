@@ -16,29 +16,20 @@ ARG CMAKE_BUILD_TYPE=Release
 
 RUN true \
       && apt-get update \
-      && apt-get install -y \
-          autoconf \
-          bison \
+      && apt-get install -y --no-install-recommends \
           build-essential \
+          ca-certificates \
           cmake \
           curl \
-          flex \
           gdb \
-          g++ \
-          gnupg \
-          libboost-dev \
-          libboost-filesystem-dev \
-          libboost-regex-dev \
-          libboost-system-dev \
+          libc-dbg \
           libdouble-conversion-dev \
           libgflags-dev \
           libsnappy-dev \
           libstdc++6-8-dbg \
           pkg-config \
-          python \
           tar \
-          time \
-      && true
+          time
 
 RUN true \
       && mkdir -p /src \
@@ -53,7 +44,6 @@ RUN true \
       && cd cpp \
       && cmake \
           -DARROW_PARQUET=ON \
-          -DARROW_COMPUTE=ON \
           -DARROW_WITH_SNAPPY=ON \
           -DARROW_OPTIONAL_INSTALL=ON \
           -DARROW_BUILD_STATIC=ON \
