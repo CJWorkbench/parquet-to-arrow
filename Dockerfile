@@ -3,7 +3,7 @@ FROM debian:bullseye AS cpp-builddeps
 # DEBUG SYMBOLS: to build with debug symbols (which help gdb), run
 # `docker build --build-arg CMAKE_BUILD_TYPE=Debug ...`
 #
-# We install libstdc++6-8-dbg, gdb and time regardless. They won't affect final
+# We install libstdc++6-10-dbg, gdb and time regardless. They don't affect final
 # image size in Release mode.
 ARG CMAKE_BUILD_TYPE=Release
 
@@ -25,7 +25,6 @@ RUN true \
           libc-dbg \
           libdouble-conversion-dev \
           libgflags-dev \
-          libsnappy-dev \
           libstdc++6-10-dbg \
           pkg-config \
           tar \
@@ -34,28 +33,31 @@ RUN true \
 RUN true \
       && mkdir -p /src \
       && cd /src \
-      && curl https://apache.mirror.colo-serv.net/arrow/arrow-1.0.1/apache-arrow-1.0.1.tar.gz | tar xz
+      && curl -L "http://www.apache.org/dyn/closer.lua?filename=arrow/arrow-3.0.0/apache-arrow-3.0.0.tar.gz&action=download" | tar xz
+
 
 COPY arrow-patches/ /arrow-patches/
 
 RUN true \
-      && cd /src/apache-arrow-1.0.1 \
+      && cd /src/apache-arrow-3.0.0 \
       && for patch in $(find /arrow-patches/*.diff | sort); do patch --verbose -p1 <$patch; done \
       && cd cpp \
       && cmake \
           -DARROW_PARQUET=ON \
+          -DARROW_COMPUTE=OFF \
           -DARROW_WITH_SNAPPY=ON \
+          -DARROW_WITH_UTF8PROC=OFF \
+          -DARROW_WITH_RE2=OFF \
+          -DARROW_SNAPPY_USE_SHARED=OFF \
           -DARROW_OPTIONAL_INSTALL=ON \
           -DARROW_BUILD_STATIC=ON \
           -DARROW_BUILD_SHARED=OFF \
           -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE . \
-      && make -j4 arrow \
-      && make -j4 arrow_bundled_dependencies \
-      && make -j4 parquet \
+      && make -j4 arrow arrow_bundled_dependencies parquet \
       && make install
 
 
-FROM python:3.8.5-buster AS python-dev
+FROM python:3.9.2-buster AS python-dev
 
 RUN pip install pyarrow==3.0.0 pytest pandas==1.2.3
 

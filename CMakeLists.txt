@@ -20,8 +20,6 @@ cmake_minimum_required(VERSION 3.2.0)
 
 project(parquet-to-arrow)
 
-include(FindPkgConfig)
-
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake_modules")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "/usr/local/lib/cmake/arrow")
 
@@ -38,14 +36,13 @@ add_compile_options(-Wall -Werror)
 find_package(gflags REQUIRED)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
-find_package(Snappy REQUIRED)
 
 include_directories(SYSTEM ${ARROW_INCLUDE_DIR} ${PARQUET_INCLUDE_DIR} ${GFLAGS_INCLUDE_DIRS})
 # From https://github.com/apache/arrow/blob/afe5515754d4c4f67a0e5ee066513f8383f00d70/cpp/examples/minimal_build/CMakeLists.txt#L37
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-set(COMMON_LIBS Threads::Threads parquet_static arrow_static snappy)
+set(COMMON_LIBS Threads::Threads parquet_static arrow_static)
 
 add_executable(parquet-diff src/parquet-diff.cc src/common.cc)
 target_link_libraries(parquet-diff PRIVATE -static ${COMMON_LIBS})

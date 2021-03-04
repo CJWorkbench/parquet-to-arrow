@@ -2,6 +2,7 @@ v2.2.0 - 2021-03-04
 -------------------
 
 * Support DATE data type.
+* Upgrade underlying Arrow library to v3.0.0.
 
 v2.1.0 - 2020-09-21
 -------------------
