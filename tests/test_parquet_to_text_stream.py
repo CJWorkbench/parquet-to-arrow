@@ -1,10 +1,12 @@
-from datetime import datetime
 import json
-from pathlib import Path
 import subprocess
+from datetime import datetime
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pyarrow
+
 from .util import parquet_file
 
 
@@ -423,5 +425,20 @@ def test_convert_datetime_ns():
             {"ns": "2019-03-04T05:06:07.008Z"},
             {"ns": "2019-03-04T05:06:07.000008Z"},
             {"ns": "1960-03-04T05:06:07.000000008Z"},
+        ],
+    )
+
+
+def test_convert_date32():
+    _test_convert_via_arrow(
+        pyarrow.table(
+            {"A": pyarrow.array([18689, 0, -3, None], type=pyarrow.date32())}
+        ),
+        "A\n2021-03-03\n1970-01-01\n1969-12-29\n",
+        [
+            {"A": "2021-03-03"},
+            {"A": "1970-01-01"},
+            {"A": "1969-12-29"},
+            {"A": None},
         ],
     )

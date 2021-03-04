@@ -1,4 +1,4 @@
-FROM debian:buster AS cpp-builddeps
+FROM debian:bullseye AS cpp-builddeps
 
 # DEBUG SYMBOLS: to build with debug symbols (which help gdb), run
 # `docker build --build-arg CMAKE_BUILD_TYPE=Debug ...`
@@ -26,7 +26,7 @@ RUN true \
           libdouble-conversion-dev \
           libgflags-dev \
           libsnappy-dev \
-          libstdc++6-8-dbg \
+          libstdc++6-10-dbg \
           pkg-config \
           tar \
           time
@@ -57,7 +57,7 @@ RUN true \
 
 FROM python:3.8.5-buster AS python-dev
 
-RUN pip install pyarrow==1.0.1 pytest pandas==1.0.1 fastparquet==0.3.3
+RUN pip install pyarrow==3.0.0 pytest pandas==1.2.3
 
 RUN mkdir /app
 WORKDIR /app
@@ -84,7 +84,7 @@ FROM python-dev AS test
 COPY --from=cpp-build /usr/bin/parquet-* /usr/bin/
 COPY tests/ /app/tests/
 WORKDIR /app
-RUN pytest -vv
+RUN pytest -s -vv
 
 
 FROM scratch AS dist

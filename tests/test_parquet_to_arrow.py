@@ -1,13 +1,14 @@
-from datetime import datetime
-from pathlib import Path
 import subprocess
 import tempfile
+from datetime import datetime
+from pathlib import Path
+
 import numpy as np
-import fastparquet
-import pandas as pd
-import pyarrow
 import pytest
-from .util import parquet_file, assert_table_equals
+
+import pyarrow
+
+from .util import assert_table_equals, empty_file, parquet_file
 
 
 def do_convert(parquet_path: Path) -> pyarrow.Table:
@@ -62,22 +63,43 @@ def test_read_write_text_all_null():
     )
 
 
+#     with tempfile.NamedTemporaryFile() as tf:
+#         fastparquet.write(tf.name, dataframe, object_encoding="utf8")
+#         result = do_convert(Path(tf.name))
+#         expected = pyarrow.table(
+#             {"A": pyarrow.array(["x", None, "y", "x", "x"]).dictionary_encode()}
+#         )
+#         assert_table_equals(result, expected)
 @pytest.mark.filterwarnings("ignore:RangeIndex._:DeprecationWarning")
 def test_read_fastparquet_text_categorical():
-    dataframe = pd.DataFrame(
-        {"A": pd.Series(["x", None, "y", "x", "x"], dtype="category")}
+    # To write this file, install fastparquet and run:
+    #
+    # import fastparquet
+    # import pandas as pd
+    # fastparquet.write(
+    #     'x.parquet',
+    #     pd.DataFrame({"A": pd.Series(["x", None, "y", "x", "x"], dtype="category")})
+    # )
+    path = (
+        Path(__file__).parent / "files" / "column-A-dictionary-from-fastparquet.parquet"
     )
-    with tempfile.NamedTemporaryFile() as tf:
-        fastparquet.write(tf.name, dataframe, object_encoding="utf8")
-        result = do_convert(Path(tf.name))
-        expected = pyarrow.table(
+    result = do_convert(path)
+    assert_table_equals(
+        result,
+        pyarrow.table(
             {"A": pyarrow.array(["x", None, "y", "x", "x"]).dictionary_encode()}
-        )
-        assert_table_equals(result, expected)
+        ),
+    )
 
 
-def test_read_write_datetime():
+def test_read_write_timestamp():
     _test_read_write_table(pyarrow.table({"A": [datetime.now(), None, datetime.now()]}))
+
+
+def test_read_write_date():
+    _test_read_write_table(
+        pyarrow.table({"A": pyarrow.array([18689, None, -123], pyarrow.date32())})
+    )
 
 
 def test_na_only_categorical_has_categorical_type():
@@ -109,13 +131,50 @@ def test_read_zero_row_groups():
     # When no row groups are in the file, there actually isn't anything in
     # the file that suggests a dictionary. We should read that empty column
     # back as strings.
-
-    # In this example, `pyarrow.string()` is equivalent to
-    # `pyarrow.dictionary(pyarrow.int32(), pyarrow.string())`
-    table = pyarrow.Table.from_batches(
-        [], schema=pyarrow.schema([("A", pyarrow.string()), ("B", pyarrow.int32())])
+    #
+    # Note that pyarrow.parquet can't actually write a file without including
+    # Arrow-specific metadata. Other Parquet writers, like fastparquet, can.
+    #
+    # To write this file, install fastparquet and run:
+    #
+    # import fastparquet
+    # import pandas as pd
+    # from fastparquet import parquet_thrift
+    # fmd = parquet_thrift.FileMetaData(
+    #     num_rows=0,
+    #     schema=[
+    #         parquet_thrift.SchemaElement(name='schema', num_children=1),
+    #         parquet_thrift.SchemaElement(
+    #             name='A',
+    #             type_length=None,
+    #             converted_type=parquet_thrift.ConvertedType.UTF8,
+    #             type=parquet_thrift.Type.BYTE_ARRAY,
+    #             repetition_type=parquet_thrift.FieldRepetitionType.REQUIRED
+    #         ),
+    #     ],
+    #     version=1,
+    #     row_groups=[],
+    #     key_value_metadata=[]
+    # )
+    # fastparquet.writer.write_simple(
+    #     'x.parquet',
+    #     pd.DataFrame({"A": pd.Series([], dtype=str).astype("category")}),
+    #     fmd=fmd,
+    #     compression=None,
+    #     open_with=fastparquet.writer.default_open,
+    #     has_nulls=False,
+    #     row_group_offsets=[]
+    # )
+    path = (
+        Path(__file__).parent / "files" / "column-A-string-with-no-row-groups.parquet"
     )
-    _test_read_write_table(table)
+    result = do_convert(path)
+    assert_table_equals(
+        result,
+        pyarrow.Table.from_batches(
+            [], schema=pyarrow.schema([("A", pyarrow.string())])
+        ),
+    )
 
 
 def test_invalid_parquet():
@@ -134,21 +193,3 @@ def test_invalid_parquet():
         b"Invalid: Parquet magic bytes not found in footer. Either the file is corrupted"
         b" or this is not a parquet file.\n"
     )
-
-
-@pytest.mark.filterwarnings("ignore:RangeIndex._:DeprecationWarning")
-def test_empty_categorical_with_zero_row_groups_has_object_type():
-    # In Parquet, "dictionary encoding" is a property of each chunk, not of the
-    # column. So if there are zero chunks, we can't know whether we want
-    # dictionary encoding.
-    #
-    # Assume no dictionary -- that's simpler.
-    dataframe = pd.DataFrame({"A": pd.Series([], dtype=str).astype("category")})
-    with tempfile.NamedTemporaryFile() as parquet_file:
-        fastparquet.write(
-            parquet_file.name, dataframe, row_group_offsets=[], write_index=False
-        )
-
-        result = do_convert(Path(parquet_file.name))
-        expected = pyarrow.table({"A": pyarrow.array([], type=pyarrow.string())})
-        assert_table_equals(result, expected)

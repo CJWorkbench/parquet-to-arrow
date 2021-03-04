@@ -1,8 +1,10 @@
 import datetime
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from typing import Tuple
+
 import pyarrow
+
 from .util import empty_file, parquet_file
 
 
@@ -245,6 +247,26 @@ def test_column_str_byte_compare_only():
     assert arrow_table_diff(table1, table2) == (
         1,
         "RowGroup 0, Column 0, Row 0:\n-\u2126\n+\u03A9\n",
+    )
+
+
+def test_date_same():
+    table = pyarrow.table(
+        {"A": [datetime.date(2019, 10, 21), datetime.date(2021, 3, 4)]}
+    )
+    assert_arrow_table_identity(table)
+
+
+def test_date_different():
+    table1 = pyarrow.table(
+        {"A": [datetime.date(2019, 10, 21), datetime.date(2021, 3, 4)]}
+    )
+    table2 = pyarrow.table(
+        {"A": [datetime.date(2019, 10, 22), datetime.date(2021, 3, 4)]}
+    )
+    assert arrow_table_diff(table1, table2) == (
+        1,
+        "RowGroup 0, Column 0, Row 0:\n-18190\n+18191\n",
     )
 
 

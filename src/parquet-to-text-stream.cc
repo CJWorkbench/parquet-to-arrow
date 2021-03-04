@@ -20,6 +20,7 @@
 #include <parquet/arrow/reader.h>
 #include <parquet/exception.h>
 
+#include "vendor/gcc/sys_date_to_ymd_string.h"
 #include "common.h"
 #include "range.h"
 
@@ -73,6 +74,7 @@ DEFINE_validator(column_range, &validate_range);
 static const int BATCH_SIZE = 30;
 
 
+struct Date { int32_t value; };
 struct TimestampMillis { int64_t value; };
 struct TimestampMicros { int64_t value; };
 struct TimestampNanos { int64_t value; };
@@ -82,6 +84,12 @@ template<typename PhysicalType, typename PrintableType>
 PrintableType physical_to_printable(PhysicalType value)
 {
   return static_cast<PrintableType>(value);
+}
+
+template<>
+Date physical_to_printable(int32_t value)
+{
+  return Date { value };
 }
 
 template<>
@@ -202,6 +210,7 @@ using BufferedInt64ColumnReader = BufferedColumnReader<parquet::Int64Reader, int
 using BufferedUint32ColumnReader = BufferedColumnReader<parquet::Int32Reader, uint32_t>;
 using BufferedUint64ColumnReader = BufferedColumnReader<parquet::Int64Reader, uint64_t>;
 using BufferedStringColumnReader = BufferedColumnReader<parquet::ByteArrayReader, std::string_view>;
+using BufferedDateColumnReader = BufferedColumnReader<parquet::Int32Reader, Date>;
 using BufferedTimestampMillisColumnReader = BufferedColumnReader<parquet::Int64Reader, TimestampMillis>;
 using BufferedTimestampMicrosColumnReader = BufferedColumnReader<parquet::Int64Reader, TimestampMicros>;
 using BufferedTimestampNanosColumnReader = BufferedColumnReader<parquet::Int64Reader, TimestampNanos>;
@@ -356,6 +365,12 @@ public:
   void write(int64_t value) { fprintf(this->fp, "%" PRIi64, value); }
   void write(uint32_t value) { fprintf(this->fp, "%" PRIu32, value); }
   void write(uint64_t value) { fprintf(this->fp, "%" PRIu64, value); }
+
+  void write(Date value) {
+    char buf[] = "YYYY-MM-DD"; // correct size and initialized
+    write_day_since_epoch_as_yyyy_mm_dd(value.value, &buf[0]);
+    this->writeString(std::string_view(buf, 10));
+  }
 
 protected:
 
@@ -681,6 +696,8 @@ makeTranscriberForIntColumn(parquet::ParquetFileReader& fileReader, int columnIn
       default:
         throw std::runtime_error("Unknown TimeUnit in a TIMESTAMP column");
     }
+  } else if (logicalType->type() == parquet::LogicalType::Type::DATE) {
+    return makeTranscriber<BufferedDateColumnReader>(fileReader, columnIndex, printer);
   } else if (
     logicalType->type() == parquet::LogicalType::Type::INT
     // "NONE" means, signed-int
