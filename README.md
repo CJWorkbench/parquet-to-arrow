@@ -55,10 +55,12 @@ parquet-to-text-stream
 * _Manageable RAM usage_: in large datasets, hold a small number of rows (and
   all column dictionaries) in memory.
 * _Quick time to first byte_: streaming clients see results quickly.
-* _CSV Output_ (choose `csv` format): null/inf/-inf/NaN are all output as empty
-  string; all but the most wonky floats are formatted as decimal; timestamps
-  are ISO8601-formatted to the fewest characters possible, remaining lossless
-  (e.g., "2019-09-24" instead of "2019-09-24T00:00:00.000000000Z")
+* _CSV Output_ (choose `csv` format):
+  [RFC4180](https://datatracker.ietf.org/doc/html/rfc4180#section-2)-compliant.
+   null/inf/-inf/NaN are all output as empty string; all but the most wonky
+   floats are formatted as decimal; timestamps are ISO8601-formatted to the
+   fewest characters possible, remaining lossless (e.g., "2019-09-24T00Z"
+   instead of "2019-09-24T00:00:00.000000000Z")
 * _JSON Output_ (choose `json` format): null/inf/-inf/NaN are all output as
   `null`; floats are formatted according to
   [ECMAScript Standard](https://www.ecma-international.org/ecma-262/6.0/#sec-tostring-applied-to-the-number-type);
