@@ -75,8 +75,7 @@ ARG CMAKE_BUILD_TYPE=Release
 RUN cmake -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE .
 
 COPY src/ /app/src/
-RUN VERBOSE=true make -j4 install
-# RUN VERBOSE=true make -j4 install/strip
+RUN VERBOSE=true make -j4 install/strip
 # Display size. In v2.1, it's ~7MB per executable.
 RUN ls -lh /usr/bin/parquet-*
 
