@@ -426,7 +426,7 @@ protected:
       if (time.tm_hour != 0 || time.tm_min != 0 || time.tm_sec != 0) {
         fprintf(this->fp, "T%02d:%02d:%02dZ", time.tm_hour, time.tm_min, time.tm_sec);
       } else {
-        // It's 00:00:00.000000000Z -- don't print any of it
+        fputc_unlocked('Z', this->fp); // It's 00:00:00.000000000Z -- just print the Z
       }
     } else if (nFractionDigits == 3) {
       fprintf(this->fp, "T%02d:%02d:%02d.%03dZ", time.tm_hour, time.tm_min, time.tm_sec, subsecondFraction);
