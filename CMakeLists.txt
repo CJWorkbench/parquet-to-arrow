@@ -36,11 +36,11 @@ add_compile_options(-Wall -Werror)
 find_package(gflags REQUIRED)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
-
-include_directories(SYSTEM ${ARROW_INCLUDE_DIR} ${PARQUET_INCLUDE_DIR} ${GFLAGS_INCLUDE_DIRS})
 # From https://github.com/apache/arrow/blob/afe5515754d4c4f67a0e5ee066513f8383f00d70/cpp/examples/minimal_build/CMakeLists.txt#L37
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+
+include_directories(SYSTEM ${ARROW_INCLUDE_DIR} ${GFLAGS_INCLUDE_DIRS})
 
 set(COMMON_LIBS Threads::Threads parquet_static arrow_static)
 

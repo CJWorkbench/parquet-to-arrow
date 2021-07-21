@@ -125,34 +125,33 @@ public:
 
 private:
   std::shared_ptr<ColumnReaderType> parquetReader;
-  std::array<PhysicalType, BATCH_SIZE> batch;
-  // `batchValid`: Arrow bitset must "be able to store 1 bit more than required"
-  // 0 values => 1 byte
-  // 1 value => 1 byte
-  // 7 values => 1 byte
-  // 8 values => 2 bytes
-  // 9 values => 2 bytes
-  std::array<uint8_t, BATCH_SIZE / 8 + 1> batchValid;
+  std::array<PhysicalType, BATCH_SIZE> batchValues; // nulls not included
+  std::array<int16_t, BATCH_SIZE> batchValid; // 1 = valid; 0 = null
   int64_t batchSize;
-  int64_t batchCursor;
+  int64_t batchValidCursor; // [0, batchSize] -- row index
+  int64_t batchValueCursor; // [0, batchSize - nNulls] -- not all rows have a value
 
 public:
 
   BufferedColumnReader(std::shared_ptr<ColumnReaderType> parquetReader_)
     : parquetReader(parquetReader_)
     , batchSize(0)
-    , batchCursor(0)
+    , batchValidCursor(0)
+    , batchValueCursor(0)
   {
     assert(parquetReader->descr()->max_definition_level() == 1);
     assert(parquetReader->descr()->max_repetition_level() == 0);
   }
 
   void skipRows(int64_t toSkip) {
-    int64_t skipInBatch = std::min(toSkip, this->batchSize - this->batchCursor);
+    int64_t skipInBatch = std::min(toSkip, this->batchSize - this->batchValidCursor);
 
     // Skip within the batch
-    this->batchCursor += skipInBatch;
     toSkip -= skipInBatch;
+    while (skipInBatch--) {
+      this->batchValueCursor += this->batchValid[this->batchValidCursor];
+      this->batchValidCursor++;
+    }
 
     // Skip _past_ the batch
     [[maybe_unused]] auto nSkipped = this->parquetReader->Skip(toSkip);
@@ -165,41 +164,35 @@ public:
    * Undefined behavior if there is no next element.
    */
   std::optional<PrintableType> next() {
-    if (this->batchCursor >= this->batchSize) {
+    if (this->batchValidCursor >= this->batchSize) {
       this->rebuffer();
 
       // Crash if calling next() when hasNext() is false
-      assert(this->batchCursor < this->batchSize);
+      assert(this->batchValidCursor < this->batchSize);
     }
 
     std::optional<PrintableType> ret;
-    bool isValid = arrow::BitUtil::GetBit(&this->batchValid[0], this->batchCursor);
+    bool isValid = this->batchValid[this->batchValidCursor];
     if (isValid) { // "valid" means "not-null"
-      ret = physical_to_printable<PhysicalType, PrintableType>(this->batch[this->batchCursor]);
+      ret = physical_to_printable<PhysicalType, PrintableType>(this->batchValues[this->batchValueCursor]);
+      this->batchValueCursor++;
     }
-    this->batchCursor++;
+    this->batchValidCursor++;
     return ret;
   }
 
 private:
   void rebuffer() {
-    std::array<int16_t, BATCH_SIZE> def_levels;
-    int64_t levels_read;
     int64_t values_read;
-    int64_t null_count;
-
-    this->batchSize = this->parquetReader->ReadBatchSpaced(
+    this->batchSize = this->parquetReader->ReadBatch(
       BATCH_SIZE,
-      &def_levels[0], // non-required fields have max_definition_level==1
-      nullptr,
-      &this->batch[0],
       &this->batchValid[0],
-      0, // valid_bits_offset
-      &levels_read,
-      &values_read,
-      &null_count
+      nullptr, // rep_levels
+      &this->batchValues[0],
+      &values_read
     );
-    this->batchCursor = 0;
+    this->batchValidCursor = 0;
+    this->batchValueCursor = 0;
   }
 };
 
@@ -311,7 +304,7 @@ public:
 
   virtual void writeFileHeader() = 0; // JSON '['
   virtual void writeFileFooter() = 0; // JSON ']'
-  virtual void writeRecordStart(int rowIndex) = 0; // JSON '{'; CSV '\n'
+  virtual void writeRecordStart(int rowIndex) = 0; // JSON '{'; CSV '\r\n'
   virtual void writeRecordStop() = 0; // JSON '}'
   virtual void writeFieldStart(int columnIndex, std::string_view name) = 0; // JSON field name; CSV comma
   virtual void writeHeaderField(int columnIndex, std::string_view name) = 0; // CSV field name
@@ -430,10 +423,12 @@ protected:
       nFractionDigits -= 3;
     }
     if (nFractionDigits == 0) {
-      if (time.tm_hour != 0 || time.tm_min != 0 || time.tm_sec != 0) {
-        fprintf(this->fp, "T%02d:%02d:%02dZ", time.tm_hour, time.tm_min, time.tm_sec);
+      if (time.tm_min == 0 && time.tm_sec == 0) {
+        fprintf(this->fp, "T%02dZ", time.tm_hour);
+      } else if (time.tm_sec == 0) {
+        fprintf(this->fp, "T%02d:%02dZ", time.tm_hour, time.tm_min);
       } else {
-        // It's 00:00:00.000000000Z -- don't print any of it
+        fprintf(this->fp, "T%02d:%02d:%02dZ", time.tm_hour, time.tm_min, time.tm_sec);
       }
     } else if (nFractionDigits == 3) {
       fprintf(this->fp, "T%02d:%02d:%02d.%03dZ", time.tm_hour, time.tm_min, time.tm_sec, subsecondFraction);
@@ -454,7 +449,10 @@ struct CsvPrinter : public Printer {
   void writeRecordStop() override {}
 
   void writeRecordStart(int rowIndex) override {
-    fputc_unlocked('\n', this->fp); // newline -- start new CSV record
+    // newline -- start new CSV record
+    // RFC4180 says CRLF: https://datatracker.ietf.org/doc/html/rfc4180#section-2
+    fputc_unlocked('\r', this->fp);
+    fputc_unlocked('\n', this->fp);
   }
 
   void writeFieldStart(int columnIndex, std::string_view name) override {
