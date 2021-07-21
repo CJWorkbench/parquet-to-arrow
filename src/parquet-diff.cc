@@ -82,30 +82,23 @@ int diffSchema(const parquet::SchemaDescriptor& schema1, const parquet::SchemaDe
 
 
 template <typename DType>
-void readColumnChunk(int rowGroupNumber, int columnNumber, parquet::TypedColumnReader<DType>& chunk, int nRows, typename DType::c_type* values, uint8_t* valid) {
-  std::vector<int16_t> definitionLevels(nRows);
-  std::vector<int16_t> repetitionLevels(nRows);
-  for (int nRead = 0; nRead < nRows;) {
-    int64_t levels_read(0);
-    int64_t values_read(0);
-    int64_t null_count_out(0);
-    int64_t nReadThisBatch = chunk.ReadBatchSpaced(
-      nRows - nRead, // batch_size
-      &definitionLevels[nRead],
-      &repetitionLevels[nRead],
-      &values[nRead],
-      valid,
-      nRead, // valid_bits_offset
-      &levels_read,
-      &values_read,
-      &null_count_out
+void readColumnChunk(int rowGroupNumber, int columnNumber, parquet::TypedColumnReader<DType>& chunk, int nRows, typename DType::c_type* values, int16_t* valid) {
+  int64_t valueOffset = 0;
+  for (int64_t validOffset = 0; validOffset < nRows;) {
+    int64_t nValuesReadThisBatch;
+    int64_t nReadThisBatch = chunk.ReadBatch(
+      nRows - validOffset, // batch_size
+      &valid[validOffset],
+      nullptr, // rep_levels
+      &values[valueOffset],
+      &nValuesReadThisBatch
     );
-
     if (nReadThisBatch == 0) {
       break;
     }
 
-    nRead += nReadThisBatch;
+    validOffset += nReadThisBatch;
+    valueOffset += nValuesReadThisBatch;
   }
 }
 
@@ -174,46 +167,41 @@ template <typename DType>
 int diffColumnChunkTyped(int rowGroupNumber, int columnNumber, parquet::TypedColumnReader<DType>& chunk1, parquet::TypedColumnReader<DType>& chunk2, int nRows) {
   std::vector<typename DType::c_type> values1(nRows);
   std::vector<typename DType::c_type> values2(nRows);
-  // `valid_bits`: must "be able to store 1 bit more than required"
-  // 0 values => 1 byte
-  // 1 value => 1 byte
-  // 7 values => 1 byte
-  // 8 values => 2 bytes
-  // 9 values => 2 bytes
-  std::vector<uint8_t> valid1(nRows / 8 + 1); // bitmap
-  std::vector<uint8_t> valid2(nRows / 8 + 1); // bitmap
+  std::vector<int16_t> valid1(nRows); // 1 = there is a value; 0 = skipped a value
+  std::vector<int16_t> valid2(nRows); // 1 = there is a value; 0 = skipped a value
 
   readColumnChunk(rowGroupNumber, columnNumber, chunk1, nRows, &values1[0], &valid1[0]);
   readColumnChunk(rowGroupNumber, columnNumber, chunk2, nRows, &values2[0], &valid2[0]);
 
-  for (int i = 0; i < nRows; i++) {
-    if (arrow::BitUtil::GetBit(&valid1[0], i)) {
+  for (int i = 0, valueOffset = 0; i < nRows; i++) {
+    if (valid1[i]) {
       // left: value
-      if (arrow::BitUtil::GetBit(&valid2[0], i)) {
+      if (valid2[i]) {
         // right: value
-        if (values1[i] != values2[i]) {
+        if (values1[valueOffset] != values2[valueOffset]) {
           std::cout
             << "RowGroup " << rowGroupNumber << ", Column " << columnNumber << ", Row " << i << ":" << std::endl
-            << "-" << valueToString(values1[i]) << std::endl
-            << "+" << valueToString(values2[i]) << std::endl;
+            << "-" << valueToString(values1[valueOffset]) << std::endl
+            << "+" << valueToString(values2[valueOffset]) << std::endl;
           return 1;
         }
       } else {
         // right: (null)
         std::cout
           << "RowGroup " << rowGroupNumber << ", Column " << columnNumber << ", Row " << i << ":" << std::endl
-          << "-" << valueToString(values1[i]) << std::endl
+          << "-" << valueToString(values1[valueOffset]) << std::endl
           << "+(null)" << std::endl;
         return 1;
       }
+      valueOffset++;
     } else {
       // left: (null)
-      if (arrow::BitUtil::GetBit(&valid2[0], i)) {
+      if (valid2[i]) {
         // right: value
         std::cout
           << "RowGroup " << rowGroupNumber << ", Column " << columnNumber << ", Row " << i << ":" << std::endl
           << "-(null)" << std::endl
-          << "+" << valueToString(values2[i]) << std::endl;
+          << "+" << valueToString(values2[valueOffset]) << std::endl;
         return 1;
       }
     }

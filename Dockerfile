@@ -33,13 +33,12 @@ RUN true \
 RUN true \
       && mkdir -p /src \
       && cd /src \
-      && curl -L "http://www.apache.org/dyn/closer.lua?filename=arrow/arrow-3.0.0/apache-arrow-3.0.0.tar.gz&action=download" | tar xz
-
+      && curl -L "http://www.apache.org/dyn/closer.lua?filename=arrow/arrow-4.0.1/apache-arrow-4.0.1.tar.gz&action=download" | tar xz
 
 COPY arrow-patches/ /arrow-patches/
 
 RUN true \
-      && cd /src/apache-arrow-3.0.0 \
+      && cd /src/apache-arrow-4.0.1 \
       && for patch in $(find /arrow-patches/*.diff | sort); do patch --verbose -p1 <$patch; done \
       && cd cpp \
       && cmake \
@@ -57,9 +56,9 @@ RUN true \
       && make install
 
 
-FROM python:3.9.2-buster AS python-dev
+FROM python:3.9.6-buster AS python-dev
 
-RUN pip install pyarrow==3.0.0 pytest pandas==1.2.3
+RUN pip install pyarrow==4.0.1 pytest pandas==1.3.0 fastparquet
 
 RUN mkdir /app
 WORKDIR /app
@@ -76,7 +75,8 @@ ARG CMAKE_BUILD_TYPE=Release
 RUN cmake -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE .
 
 COPY src/ /app/src/
-RUN VERBOSE=true make -j4 install/strip
+RUN VERBOSE=true make -j4 install
+# RUN VERBOSE=true make -j4 install/strip
 # Display size. In v2.1, it's ~7MB per executable.
 RUN ls -lh /usr/bin/parquet-*
 

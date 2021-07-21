@@ -1,3 +1,10 @@
+v3.0.0 - 2021-07-21
+-------------------
+
+* `parquet-to-text-stream`: format TIMESTAMP with `Z` even at midnight:
+  e.g., `2021-07-21Z`. (Previously, midnight had no `Z`.)
+* `parquet-to-text-stream` `csv`: delimit records with `\r\n`, not `\n`.
+
 v2.2.0 - 2021-03-04
 -------------------
 
