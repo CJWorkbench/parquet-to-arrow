@@ -7,6 +7,10 @@ v3.0.0 - 2021-07-21
   ref: https://datatracker.ietf.org/doc/html/rfc3339#section-5
 * `parquet-to-text-stream` `csv`: delimit records with `\r\n`, not `\n`.
 
+Upgrade instructions: if you use `parquet-to-text-stream` for CSV output, make
+sure the programs reading your CSVs handle the updated newlines and timestamp
+format.
+
 v2.2.0 - 2021-03-04
 -------------------
 
