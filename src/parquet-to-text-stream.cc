@@ -304,7 +304,7 @@ public:
 
   virtual void writeFileHeader() = 0; // JSON '['
   virtual void writeFileFooter() = 0; // JSON ']'
-  virtual void writeRecordStart(int rowIndex) = 0; // JSON '{'; CSV '\n'
+  virtual void writeRecordStart(int rowIndex) = 0; // JSON '{'; CSV '\r\n'
   virtual void writeRecordStop() = 0; // JSON '}'
   virtual void writeFieldStart(int columnIndex, std::string_view name) = 0; // JSON field name; CSV comma
   virtual void writeHeaderField(int columnIndex, std::string_view name) = 0; // CSV field name
@@ -449,7 +449,10 @@ struct CsvPrinter : public Printer {
   void writeRecordStop() override {}
 
   void writeRecordStart(int rowIndex) override {
-    fputc_unlocked('\n', this->fp); // newline -- start new CSV record
+    // newline -- start new CSV record
+    // RFC4180 says CRLF: https://datatracker.ietf.org/doc/html/rfc4180#section-2
+    fputc_unlocked('\r', this->fp);
+    fputc_unlocked('\n', this->fp);
   }
 
   void writeFieldStart(int columnIndex, std::string_view name) override {

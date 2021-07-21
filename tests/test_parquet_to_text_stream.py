@@ -71,7 +71,7 @@ def test_convert_int32_int64():
                 "i32": pyarrow.array([1, 1073741824, -2, None], type=pyarrow.int32()),
             }
         ),
-        "i64,i32\n1,1\n4611686018427387904,1073741824\n-2,-2\n,",
+        "i64,i32\r\n1,1\r\n4611686018427387904,1073741824\r\n-2,-2\r\n,",
         [
             {"i64": 1, "i32": 1},
             {"i64": 4611686018427387904, "i32": 1073741824},
@@ -91,7 +91,7 @@ def test_convert_int8_int16():
                 "i16": pyarrow.array([1, -320, 31022, None], type=pyarrow.int16()),
             }
         ),
-        "i8,i16\n1,1\n-32,-320\n120,31022\n,",
+        "i8,i16\r\n1,1\r\n-32,-320\r\n120,31022\r\n,",
         [
             {"i8": 1, "i16": 1},
             {"i8": -32, "i16": -320},
@@ -110,7 +110,7 @@ def test_convert_uint64():
                 )
             }
         ),
-        "u64\n1\n9223372039002259456\n",
+        "u64\r\n1\r\n9223372039002259456\r\n",
         [{"u64": 1}, {"u64": 9223372039002259456}, {"u64": None}],
     )
 
@@ -126,7 +126,7 @@ def test_convert_uint8_uint16_uint32():
                 "u32": pyarrow.array([1, 4294967291, None], type=pyarrow.uint32()),
             }
         ),
-        "u8,u16,u32\n1,1,1\n138,38383,4294967291\n,,",
+        "u8,u16,u32\r\n1,1,1\r\n138,38383,4294967291\r\n,,",
         [
             dict(u8=1, u16=1, u32=1),
             dict(u8=138, u16=38383, u32=4294967291),
@@ -168,7 +168,7 @@ def test_convert_f32_f64():
                 ),
             }
         ),
-        "f32,f64\n0.12314,0.12314\n10000000000000000000,1e+52\n,\n,\n,\n,",
+        "f32,f64\r\n0.12314,0.12314\r\n10000000000000000000,1e+52\r\n,\r\n,\r\n,\r\n,",
         r'[{"f32":0.12314,"f64":0.12314},{"f32":10000000000000000000,"f64":1e+52},{"f32":null,"f64":null},{"f32":null,"f64":null},{"f32":null,"f64":null},{"f32":null,"f64":null}]',
     )
 
@@ -181,7 +181,7 @@ def test_convert_text():
                 "B": ["", "a", "b", "c", "d", "e", "f"],
             }
         ),
-        """A,B\nx,\n,a\ny,b\n"a,b",c\n"c\nd",d\n"a""\\b""c",e\n"0\x001\x022\r3\n4\t5",f""",
+        """A,B\r\nx,\r\n,a\r\ny,b\r\n"a,b",c\r\n"c\nd",d\r\n"a""\\b""c",e\r\n"0\x001\x022\r3\n4\t5",f""",
         [
             dict(A="x", B=""),
             dict(A=None, B="a"),
@@ -199,7 +199,7 @@ def test_convert_text_dictionaries():
         {"A": pyarrow.array(["x", "x", "y", "x", None, "y"]).dictionary_encode()}
     )
     with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
-        assert do_convert(parquet_path, "csv") == b"A\nx\nx\ny\nx\n\ny"
+        assert do_convert(parquet_path, "csv") == b"A\r\nx\r\nx\r\ny\r\nx\r\n\r\ny"
         assert do_convert(parquet_path, "json") == canonical_json(
             [{"A": "x"}, {"A": "x"}, {"A": "y"}, {"A": "x"}, {"A": None}, {"A": "y"}]
         ).encode("utf-8")
@@ -215,7 +215,10 @@ def test_convert_text_over_batch_size():
         {"A": pyarrow.array(["x"] * BATCH_SIZE + ["y", "x", None, "y"])}
     )
     with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
-        assert do_convert(parquet_path, "csv") == b"A" + (b"\nx" * 100) + b"\ny\nx\n\ny"
+        assert (
+            do_convert(parquet_path, "csv")
+            == b"A" + (b"\r\nx" * 100) + b"\r\ny\r\nx\r\n\r\ny"
+        )
         assert do_convert(parquet_path, "json") == canonical_json(
             ([{"A": "x"}] * 100) + [{"A": "y"}, {"A": "x"}, {"A": None}, {"A": "y"}]
         ).encode("utf-8")
@@ -235,7 +238,10 @@ def test_convert_text_dictionaries_over_batch_size():
         }
     )
     with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
-        assert do_convert(parquet_path, "csv") == b"A" + (b"\nx" * 100) + b"\ny\nx\n\ny"
+        assert (
+            do_convert(parquet_path, "csv")
+            == b"A" + (b"\r\nx" * 100) + b"\r\ny\r\nx\r\n\r\ny"
+        )
         assert do_convert(parquet_path, "json") == canonical_json(
             ([{"A": "x"}] * 100) + [{"A": "y"}, {"A": "x"}, {"A": None}, {"A": "y"}]
         ).encode("utf-8")
@@ -246,7 +252,7 @@ def test_convert_na_only_categorical():
         {"A": pyarrow.array([None], type=pyarrow.string()).dictionary_encode()}
     )
     with parquet_file(table, use_dictionary=[b"A"]) as parquet_path:
-        assert do_convert(parquet_path, "csv") == b"A\n"
+        assert do_convert(parquet_path, "csv") == b"A\r\n"
         assert do_convert(parquet_path, "json") == b'[{"A":null}]'
 
 
@@ -283,7 +289,7 @@ def test_column_range():
                 "E": ["e0", "e1", "e2", "e3", "e4"],
             }
         ),
-        "B,C\nb0,c0\nb1,c1\nb2,c2\nb3,c3\nb4,c4",
+        "B,C\r\nb0,c0\r\nb1,c1\r\nb2,c2\r\nb3,c3\r\nb4,c4",
         '[{"B":"b0","C":"c0"},{"B":"b1","C":"c1"},{"B":"b2","C":"c2"},{"B":"b3","C":"c3"},{"B":"b4","C":"c4"}]',
         **{"--column-range": "1-3"},
     )
@@ -300,7 +306,7 @@ def test_row_range():
                 "E": ["e0", "e1", "e2", "e3", "e4"],
             }
         ),
-        "A,B,C,D,E\na1,b1,c1,d1,e1\na2,b2,c2,d2,e2",
+        "A,B,C,D,E\r\na1,b1,c1,d1,e1\r\na2,b2,c2,d2,e2",
         '[{"A":"a1","B":"b1","C":"c1","D":"d1","E":"e1"},{"A":"a2","B":"b2","C":"c2","D":"d2","E":"e2"}]',
         **{"--row-range": "1-3"},
     )
@@ -317,7 +323,7 @@ def test_column_and_row_range():
                 "E": ["e0", "e1", "e2", "e3", "e4"],
             }
         ),
-        "D,E\nd1,e1\nd2,e2",
+        "D,E\r\nd1,e1\r\nd2,e2",
         '[{"D":"d1","E":"e1"},{"D":"d2","E":"e2"}]',
         **{"--column-range": "3-5", "--row-range": "1-3"},
     )
@@ -326,7 +332,7 @@ def test_column_and_row_range():
 def test_column_and_row_range_clip_max():
     _test_convert_via_arrow(
         pyarrow.table({"A": ["a0", "a1"], "B": ["b0", "b1"]}),
-        "B\nb1",
+        "B\r\nb1",
         '[{"B":"b1"}]',
         **{"--column-range": "1-9", "--row-range": "1-9"},
     )
@@ -354,7 +360,7 @@ def test_convert_datetime_ms():
                 )
             }
         ),
-        "ms\n2019-03-04T00Z\n2019-03-04T05Z\n2019-03-04T05:06Z\n2019-03-04T05:06:07Z\n1960-03-04T00:00:00.008Z\n\n",
+        "ms\r\n2019-03-04T00Z\r\n2019-03-04T05Z\r\n2019-03-04T05:06Z\r\n2019-03-04T05:06:07Z\r\n1960-03-04T00:00:00.008Z\r\n\r\n",
         [
             {"ms": "2019-03-04T00Z"},
             {"ms": "2019-03-04T05Z"},
@@ -385,7 +391,7 @@ def test_convert_datetime_us():
                 )
             }
         ),
-        "us\n2019-03-04T00Z\n2019-03-04T05Z\n2019-03-04T05:06Z\n2019-03-04T05:06:07Z\n2019-03-04T05:06:07.008Z\n1960-03-04T05:06:07.000008Z\n",
+        "us\r\n2019-03-04T00Z\r\n2019-03-04T05Z\r\n2019-03-04T05:06Z\r\n2019-03-04T05:06:07Z\r\n2019-03-04T05:06:07.008Z\r\n1960-03-04T05:06:07.000008Z\r\n",
         [
             {"us": "2019-03-04T00Z"},
             {"us": "2019-03-04T05Z"},
@@ -416,7 +422,7 @@ def test_convert_datetime_ns():
                 )
             }
         ),
-        "ns\n2019-03-04T00Z\n2019-03-04T05Z\n2019-03-04T05:06Z\n2019-03-04T05:06:07Z\n2019-03-04T05:06:07.008Z\n2019-03-04T05:06:07.000008Z\n1960-03-04T05:06:07.000000008Z",
+        "ns\r\n2019-03-04T00Z\r\n2019-03-04T05Z\r\n2019-03-04T05:06Z\r\n2019-03-04T05:06:07Z\r\n2019-03-04T05:06:07.008Z\r\n2019-03-04T05:06:07.000008Z\r\n1960-03-04T05:06:07.000000008Z",
         [
             {"ns": "2019-03-04T00Z"},
             {"ns": "2019-03-04T05Z"},
@@ -434,7 +440,7 @@ def test_convert_date32():
         pyarrow.table(
             {"A": pyarrow.array([18689, 0, -3, None], type=pyarrow.date32())}
         ),
-        "A\n2021-03-03\n1970-01-01\n1969-12-29\n",
+        "A\r\n2021-03-03\r\n1970-01-01\r\n1969-12-29\r\n",
         [
             {"A": "2021-03-03"},
             {"A": "1970-01-01"},
