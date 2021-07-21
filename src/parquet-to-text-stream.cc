@@ -423,10 +423,12 @@ protected:
       nFractionDigits -= 3;
     }
     if (nFractionDigits == 0) {
-      if (time.tm_hour != 0 || time.tm_min != 0 || time.tm_sec != 0) {
-        fprintf(this->fp, "T%02d:%02d:%02dZ", time.tm_hour, time.tm_min, time.tm_sec);
+      if (time.tm_min == 0 && time.tm_sec == 0) {
+        fprintf(this->fp, "T%02dZ", time.tm_hour);
+      } else if (time.tm_sec == 0) {
+        fprintf(this->fp, "T%02d:%02dZ", time.tm_hour, time.tm_min);
       } else {
-        fputc_unlocked('Z', this->fp); // It's 00:00:00.000000000Z -- just print the Z
+        fprintf(this->fp, "T%02d:%02d:%02dZ", time.tm_hour, time.tm_min, time.tm_sec);
       }
     } else if (nFractionDigits == 3) {
       fprintf(this->fp, "T%02d:%02d:%02d.%03dZ", time.tm_hour, time.tm_min, time.tm_sec, subsecondFraction);
